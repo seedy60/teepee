@@ -1,0 +1,18 @@
+[project]
+name = "teepee"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cryptg>=0.5.2",
+    "pydub>=0.25.1",
+    "pyinstaller>=6.19.0",
+    "pyinstaller-versionfile>=3.1.0",
+    "sound-lib",
+    "telethon>=1.42.0",
+    "wxpython>=4.2.5",
+]
+
+[tool.uv.sources]
+sound-lib = { git = "https://github.com/samtupy/sound_lib_macos_fixes" }
