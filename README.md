@@ -81,7 +81,7 @@ The output is placed in the dist folder.
 
 ## Telegram API credentials
 
-Teepee needs a Telegram API ID and API Hash to connect. If credentials are not already embedded in your own custom build, the app will prompt you to enter them on first launch.
+Teepee needs a Telegram API ID and Hash to connect. Official Teepee builds already have these credentials built in, but if credentials are not embedded in your own custom build, the app will prompt you to enter them on first launch.
 
 To get your own credentials:
 
