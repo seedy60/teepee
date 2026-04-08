@@ -1482,7 +1482,7 @@ class MainFrame(wx.Frame):
 
     def _on_about(self, event):
         wx.MessageBox(
-            "Teepee v2516.1\n\nThe simple, speedy Telegram client with the blind in mind.",
+            "Teepee v2516.2\n\nThe simple, speedy Telegram client with the blind in mind.",
             "About Teepee",
             wx.OK | wx.ICON_INFORMATION,
             self,
