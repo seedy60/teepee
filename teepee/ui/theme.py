@@ -91,6 +91,9 @@ def _apply_colors(window):
     elif isinstance(window, wx.StaticText):
         window.SetForegroundColour(_DARK_FG)
         window.SetBackgroundColour(_DARK_BG)
+    elif isinstance(window, wx.StaticBox):
+        window.SetForegroundColour(_DARK_FG)
+        window.SetBackgroundColour(_DARK_BG)
     elif isinstance(window, wx.CheckBox):
         window.SetForegroundColour(_DARK_FG)
         window.SetBackgroundColour(_DARK_BG)

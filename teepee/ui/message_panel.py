@@ -32,6 +32,7 @@ class MessagePanel(wx.Panel):
         sizer.Hide(self.messages_label)
 
         self.messages_list = wx.ListBox(self, style=wx.LB_SINGLE)
+        self.messages_list.SetName("Messages")
         sizer.Add(self.messages_list, 1, wx.EXPAND | wx.ALL, 5)
         sizer.Hide(self.messages_list)
 
@@ -66,6 +67,7 @@ class MessagePanel(wx.Panel):
         self.input_sizer.Add(input_label, 0, wx.ALIGN_TOP | wx.ALL, 5)
 
         self.input_ctrl = wx.TextCtrl(self, style=wx.TE_MULTILINE)
+        self.input_ctrl.SetName("Message")
         self.input_sizer.Add(self.input_ctrl, 1, wx.EXPAND | wx.ALL, 5)
 
         btn_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -121,6 +123,7 @@ class MessagePanel(wx.Panel):
 
     def display_messages(self, messages):
         self._show_chat()
+        self.messages_list.Freeze()
         self.messages_list.Clear()
         for msg in reversed(messages):
             self.messages_list.Append(self._format_message_obj(msg))
@@ -128,6 +131,7 @@ class MessagePanel(wx.Panel):
             last = self.messages_list.GetCount() - 1
             self.messages_list.SetSelection(last)
             self.messages_list.EnsureVisible(last)
+        self.messages_list.Thaw()
 
     def _format_message_obj(self, msg):
         if msg.out:
@@ -154,11 +158,31 @@ class MessagePanel(wx.Panel):
         elif msg.text:
             text = msg.text.replace("\n", " | ")
         elif msg.media:
-            text = f"[{type(msg.media).__name__}]"
+            text = f"[{self._media_label(msg.media)}]"
         else:
             text = "[Empty message]"
 
         return f"[{time_str}] {sender}: {reply_prefix}{text}"
+
+    @staticmethod
+    def _media_label(media):
+        type_name = type(media).__name__
+        labels = {
+            "MessageMediaPhoto": "Photo",
+            "MessageMediaDocument": "Document",
+            "MessageMediaContact": "Contact",
+            "MessageMediaGeo": "Location",
+            "MessageMediaGeoLive": "Live location",
+            "MessageMediaVenue": "Venue",
+            "MessageMediaGame": "Game",
+            "MessageMediaInvoice": "Invoice",
+            "MessageMediaPoll": "Poll",
+            "MessageMediaDice": "Dice",
+            "MessageMediaWebPage": "Link",
+            "MessageMediaStory": "Story",
+            "MessageMediaUnsupported": "Unsupported media",
+        }
+        return labels.get(type_name, "Media")
 
     def append_new_message(self, data):
         self._show_chat()
@@ -174,16 +198,26 @@ class MessagePanel(wx.Panel):
         elif data["text"]:
             text = data["text"].replace("\n", " | ")
         elif data["is_media"]:
-            text = "[Media]"
+            msg = data.get("message")
+            if msg and msg.media:
+                text = f"[{self._media_label(msg.media)}]"
+            else:
+                text = "[Media]"
         else:
             text = "[Empty message]"
+
+        count = self.messages_list.GetCount()
+        sel = self.messages_list.GetSelection()
+        was_at_end = (count == 0 or sel == wx.NOT_FOUND or sel >= count - 1)
 
         self.messages_list.Append(
             f"[{time_str}] {sender}: {reply_prefix}{text}"
         )
-        last = self.messages_list.GetCount() - 1
-        self.messages_list.SetSelection(last)
-        self.messages_list.EnsureVisible(last)
+
+        if was_at_end:
+            last = self.messages_list.GetCount() - 1
+            self.messages_list.SetSelection(last)
+            self.messages_list.EnsureVisible(last)
 
     def do_send(self):
         text = self.input_ctrl.GetValue().strip()
@@ -206,12 +240,14 @@ class MessagePanel(wx.Panel):
                 "Stop recording and send the voice message"
             )
             self.frame.SetStatusText("Recording...")
+            self.frame._msg_frame.SetStatusText("Recording...")
             self.frame.start_voice_recording()
         else:
             self._recording = False
             self.voice_btn.SetLabel("&Voice")
             self.voice_btn.SetToolTip("Record a voice message")
             self.frame.SetStatusText("Recording stopped, sending...")
+            self.frame._msg_frame.SetStatusText("Recording stopped, sending...")
             self.frame.stop_voice_recording()
 
     def _on_play(self, event):

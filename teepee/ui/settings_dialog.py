@@ -96,6 +96,7 @@ class SettingsDialog(wx.Dialog):
         self.SetSizerAndFit(sizer)
         self.SetMinSize((420, -1))
         self.CenterOnParent()
+        self.output_choice.SetFocus()
         apply_theme(self)
 
     def GetOutputDeviceIndex(self):

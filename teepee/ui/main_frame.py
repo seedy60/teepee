@@ -15,7 +15,7 @@ from .auth_dialogs import (
     TwoFactorDialog,
 )
 from .chat_list import ChatListPanel
-from .message_panel import MessagePanel
+from .message_frame import MessageFrame
 from .settings_dialog import SettingsDialog
 
 log = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class MainFrame(wx.Frame):
         voice_manager,
         call_manager,
     ):
-        super().__init__(parent, title="Teepee", size=(900, 600))
+        super().__init__(parent, title="Teepee", size=(450, 600))
 
         self.config = config
         self.tg = telegram_manager
@@ -84,6 +84,8 @@ class MainFrame(wx.Frame):
         self._current_messages = []
         self._dialogs = []
         self._shown_msg_ids = set()
+        self._muted_chats = {}
+        self._pending_chat_focus = False
 
         self._create_ui()
         self._create_menu()
@@ -104,32 +106,54 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_TIMER, self._on_restore_timer, self._restore_timer)
         self._restore_timer.Start(500)
 
-        self.SetMinSize((600, 400))
+        self.SetMinSize((350, 400))
         self.CenterOnScreen()
+
+        from .theme import apply_theme
+        apply_theme(self)
 
     # ------------------------------------------------------------------ UI
 
     def _create_ui(self):
         panel = wx.Panel(self)
-        splitter = wx.SplitterWindow(panel, style=wx.SP_LIVE_UPDATE)
-
-        self.chat_list = ChatListPanel(splitter, self)
-        self.message_panel = MessagePanel(splitter, self)
-        self.message_panel.set_enabled(False)
-
-        splitter.SplitVertically(self.chat_list, self.message_panel, 260)
-        splitter.SetMinimumPaneSize(160)
+        self.chat_list = ChatListPanel(panel, self)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(splitter, 1, wx.EXPAND)
+        sizer.Add(self.chat_list, 1, wx.EXPAND)
         panel.SetSizer(sizer)
+
+        self._msg_frame = MessageFrame(self)
+        self.message_panel = self._msg_frame.message_panel
+        self._msg_frame_was_shown = False
 
     def _create_menu(self):
         menubar = wx.MenuBar()
 
         file_menu = wx.Menu()
+        self._profile_id = wx.NewIdRef()
+        file_menu.Append(
+            self._profile_id,
+            "My &Profile...",
+            "View and edit your Telegram profile",
+        )
+        file_menu.AppendSeparator()
         file_menu.Append(wx.ID_EXIT, "&Quit\tCtrl+Q")
         menubar.Append(file_menu, "&File")
+
+        chat_menu = wx.Menu()
+        self._mute_id = wx.NewIdRef()
+        chat_menu.Append(
+            self._mute_id,
+            "&Mute Chat...",
+            "Mute notifications for the selected chat",
+        )
+        self._unmute_id = wx.NewIdRef()
+        chat_menu.Append(
+            self._unmute_id,
+            "&Unmute Chat",
+            "Unmute notifications for the selected chat",
+        )
+        menubar.Append(chat_menu, "&Chat")
 
         tools_menu = wx.Menu()
         self._call_id = wx.NewIdRef()
@@ -199,6 +223,9 @@ class MainFrame(wx.Frame):
         self.SetMenuBar(menubar)
 
         self.Bind(wx.EVT_MENU, self._on_exit, id=wx.ID_EXIT)
+        self.Bind(wx.EVT_MENU, self._on_profile, id=self._profile_id)
+        self.Bind(wx.EVT_MENU, self._on_mute_chat, id=self._mute_id)
+        self.Bind(wx.EVT_MENU, self._on_unmute_chat, id=self._unmute_id)
         self.Bind(wx.EVT_MENU, self._on_call, id=self._call_id)
         self.Bind(wx.EVT_MENU, self._on_hangup, id=self._hangup_id)
         self.Bind(wx.EVT_MENU, self._on_settings, id=self._settings_id)
@@ -221,38 +248,29 @@ class MainFrame(wx.Frame):
         key = event.GetKeyCode()
         focused = wx.Window.FindFocus()
 
-        if focused == self.message_panel.input_ctrl:
-            if key == wx.WXK_RETURN and not event.ShiftDown():
-                self.message_panel.do_send()
+        if key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+            if focused == self.chat_list.list_ctrl:
+                self.chat_list._open_selected()
                 return
 
         if key == wx.WXK_DELETE:
-            if focused == self.message_panel.messages_list:
-                self.delete_selected_message()
-                return
             if focused == self.chat_list.list_ctrl:
                 self.delete_selected_chat()
                 return
 
-        if key == ord('R') and event.ControlDown() and not event.ShiftDown() and not event.AltDown():
-            self.reply_to_selected_message()
-            return
-
-        if key == wx.WXK_ESCAPE:
-            if self.message_panel._reply_to_msg:
-                self.message_panel.clear_reply()
-                return
-
-        # Area navigation shortcuts
         if event.ControlDown() and not event.ShiftDown() and not event.AltDown():
             if key == ord('1'):
                 self.chat_list.list_ctrl.SetFocus()
                 return
             if key == ord('2'):
-                self.message_panel.messages_list.SetFocus()
+                if self._msg_frame.IsShown():
+                    self._msg_frame.Raise()
+                    self.message_panel.messages_list.SetFocus()
                 return
             if key == ord('3'):
-                self.message_panel.input_ctrl.SetFocus()
+                if self._msg_frame.IsShown():
+                    self._msg_frame.Raise()
+                    self.message_panel.input_ctrl.SetFocus()
                 return
 
         event.Skip()
@@ -402,7 +420,8 @@ class MainFrame(wx.Frame):
 
     def _on_dialogs_loaded(self, dialogs):
         self._dialogs = list(dialogs)
-        self.chat_list.set_dialogs(self._dialogs)
+        self._update_muted_chats()
+        self.chat_list.set_dialogs(self._dialogs, set(self._muted_chats.keys()))
         self.SetStatusText(f"{len(self._dialogs)} chats loaded")
 
     def on_new_chat(self):
@@ -442,13 +461,25 @@ class MainFrame(wx.Frame):
         self._current_entity = entity
         self._current_messages = []
         self._shown_msg_ids.clear()
+        self.message_panel.clear_reply()
+        self.message_panel._clear_inline_buttons()
         self.message_panel.set_enabled(True)
+        self.message_panel._show_chat()
+        self.message_panel.messages_list.Freeze()
+        self.message_panel.messages_list.Clear()
+        self.message_panel.messages_list.Thaw()
         name = (
             getattr(entity, "first_name", None)
             or getattr(entity, "title", None)
             or getattr(entity, "username", None)
             or "Unknown"
         )
+        self._msg_frame.SetTitle(f"{name} - Teepee")
+        self._msg_frame.SetStatusText(f"Loading messages from {name}...")
+        self._msg_frame.Show()
+        self._msg_frame.Raise()
+        self.message_panel.input_ctrl.SetFocus()
+        self._pending_chat_focus = True
         self.SetStatusText(f"Loading messages from {name}...")
         self._load_dialogs()
         threading.Thread(
@@ -461,8 +492,21 @@ class MainFrame(wx.Frame):
         self._current_entity = dialog.entity
         self._current_messages = []
         self._shown_msg_ids.clear()
+        self.message_panel.clear_reply()
+        self.message_panel._clear_inline_buttons()
         self.message_panel.set_enabled(True)
-        self.SetStatusText(f"Loading messages from {dialog.name}...")
+        self.message_panel._show_chat()
+        self.message_panel.messages_list.Freeze()
+        self.message_panel.messages_list.Clear()
+        self.message_panel.messages_list.Thaw()
+        name = dialog.name or "Chat"
+        self._msg_frame.SetTitle(f"{name} - Teepee")
+        self._msg_frame.SetStatusText(f"Loading messages from {name}...")
+        self._msg_frame.Show()
+        self._msg_frame.Raise()
+        self.message_panel.input_ctrl.SetFocus()
+        self._pending_chat_focus = True
+        self.SetStatusText(f"Loading messages from {name}...")
         threading.Thread(
             target=self._load_messages_thread,
             args=(dialog.entity,),
@@ -483,7 +527,9 @@ class MainFrame(wx.Frame):
             wx.CallAfter(self._on_messages_loaded, list(messages), entity)
         except Exception as e:
             log.error("Failed to load messages: %s", e, exc_info=True)
+            self._pending_chat_focus = False
             wx.CallAfter(self.SetStatusText, f"Failed to load messages: {e}")
+            wx.CallAfter(self._msg_frame.SetStatusText, f"Failed to load messages: {e}")
 
     def _on_messages_loaded(self, messages, entity):
         if entity != self._current_entity:
@@ -495,8 +541,10 @@ class MainFrame(wx.Frame):
         # Show inline buttons for the last message if it has markup
         if messages:
             self.message_panel.update_inline_buttons(messages[0])
+            self.message_panel.show_play_button(bool(messages[0].voice))
         else:
             self.message_panel.update_inline_buttons(None)
+            self.message_panel.show_play_button(False)
         name = (
             getattr(entity, "first_name", None)
             or getattr(entity, "title", None)
@@ -504,9 +552,20 @@ class MainFrame(wx.Frame):
             or "Chat"
         )
         if messages:
-            self.SetStatusText(f"{name} - {len(messages)} messages")
+            status = f"{name} - {len(messages)} messages"
         else:
-            self.SetStatusText(f"{name} - No messages yet")
+            status = f"{name} - No messages yet"
+        self.SetStatusText(status)
+        self._msg_frame.SetStatusText(status)
+
+        if self._pending_chat_focus:
+            self._pending_chat_focus = False
+            if self._msg_frame.IsShown():
+                self._msg_frame.Raise()
+                if messages:
+                    self.message_panel.messages_list.SetFocus()
+                else:
+                    self.message_panel.input_ctrl.SetFocus()
 
     def on_message_selected(self):
         idx = self.message_panel.get_selected_message_index()
@@ -603,17 +662,20 @@ class MainFrame(wx.Frame):
         }
         self.message_panel.append_new_message(data)
         self.sound.play_sent()
+        self.SetStatusText("Message sent")
+        self._msg_frame.SetStatusText("Message sent")
 
     # ---------------------------------------------------------- Deletion
 
     def reply_to_selected_message(self):
         idx = self.message_panel.get_selected_message_index()
         if idx == wx.NOT_FOUND:
+            parent = self._msg_frame if self._msg_frame.IsShown() else self
             wx.MessageBox(
                 "Select a message to reply to.",
                 "Reply",
                 wx.OK | wx.ICON_INFORMATION,
-                self,
+                parent,
             )
             return
         msg_idx = len(self._current_messages) - 1 - idx
@@ -635,11 +697,12 @@ class MainFrame(wx.Frame):
     def delete_selected_message(self):
         idx = self.message_panel.get_selected_message_index()
         if idx == wx.NOT_FOUND:
+            parent = self._msg_frame if self._msg_frame.IsShown() else self
             wx.MessageBox(
                 "Select a message to delete.",
                 "Delete Message",
                 wx.OK | wx.ICON_INFORMATION,
-                self,
+                parent,
             )
             return
         # Messages are displayed in reversed order
@@ -647,11 +710,12 @@ class MainFrame(wx.Frame):
         if msg_idx < 0 or msg_idx >= len(self._current_messages):
             return
         msg = self._current_messages[msg_idx]
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
         if wx.MessageBox(
             "Delete this message?",
             "Confirm Delete",
             wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
-            self,
+            parent,
         ) != wx.YES:
             return
         entity = self._current_entity
@@ -682,8 +746,11 @@ class MainFrame(wx.Frame):
         if count > 0:
             new_sel = min(list_idx, count - 1)
             self.message_panel.messages_list.SetSelection(new_sel)
-        self.message_panel.messages_list.SetFocus()
+            self.message_panel.messages_list.SetFocus()
+        else:
+            self.message_panel.input_ctrl.SetFocus()
         self.SetStatusText("Message deleted")
+        self._msg_frame.SetStatusText("Message deleted")
 
     def delete_selected_chat(self):
         dialog = self.chat_list.get_selected_dialog()
@@ -729,10 +796,14 @@ class MainFrame(wx.Frame):
             self._current_entity = None
             self._current_messages = []
             self._shown_msg_ids.clear()
+            self.message_panel.clear_reply()
+            self.message_panel._clear_inline_buttons()
             self.message_panel.set_enabled(False)
             self.message_panel.messages_list.Clear()
+            self._msg_frame.Hide()
         self.SetStatusText("Chat deleted")
         self._load_dialogs()
+        self.Raise()
         self.chat_list.list_ctrl.SetFocus()
 
     # ---------------------------------------------------- Voice messages
@@ -740,11 +811,17 @@ class MainFrame(wx.Frame):
     def start_voice_recording(self):
         path = self.voice.start_recording()
         if not path:
+            self.message_panel._recording = False
+            self.message_panel.voice_btn.SetLabel("&Voice")
+            self.message_panel.voice_btn.SetToolTip("Record a voice message")
+            self.SetStatusText("Recording failed")
+            self._msg_frame.SetStatusText("Recording failed")
+            parent = self._msg_frame if self._msg_frame.IsShown() else self
             wx.MessageBox(
                 "Failed to start recording. Check that sound_lib is installed.",
                 "Recording Error",
                 wx.OK | wx.ICON_ERROR,
-                self,
+                parent,
             )
 
     def stop_voice_recording(self):
@@ -760,12 +837,18 @@ class MainFrame(wx.Frame):
     def _send_voice_thread(self, entity, file_path):
         try:
             self.tg.submit_wait(self.tg.send_voice(entity, file_path))
+            wx.CallAfter(self._on_voice_sent)
         except Exception as e:
             log.error("Failed to send voice message: %s", e)
             wx.CallAfter(
                 self._show_error,
                 f"Failed to send voice message:\n{e}",
             )
+
+    def _on_voice_sent(self):
+        self.SetStatusText("Voice message sent")
+        self._msg_frame.SetStatusText("Voice message sent")
+        self.sound.play_sent()
 
     def play_last_voice(self):
         idx = self.message_panel.get_selected_message_index()
@@ -778,6 +861,7 @@ class MainFrame(wx.Frame):
         if not voice_msg.voice:
             return
         self.SetStatusText("Downloading voice message...")
+        self._msg_frame.SetStatusText("Downloading voice message...")
         threading.Thread(
             target=self._play_voice_thread,
             args=(voice_msg,),
@@ -793,20 +877,24 @@ class MainFrame(wx.Frame):
         except Exception as e:
             log.error("Failed to download voice message: %s", e)
             wx.CallAfter(self.SetStatusText, "Failed to download voice")
+            wx.CallAfter(self._msg_frame.SetStatusText, "Failed to download voice")
 
     def _play_voice_file(self, path):
         self.voice.play_voice(path)
         self.SetStatusText("Playing voice message...")
+        self._msg_frame.SetStatusText("Playing voice message...")
 
     # --------------------------------------------------- Real-time events
 
     def _on_incoming_message(self, data):
-        if data.get("is_group"):
-            self.sound.play_group_received()
-        elif data.get("is_channel"):
-            self.sound.play_channel_received()
-        else:
-            self.sound.play_received()
+        chat_id = data.get("chat_id")
+        if not self._is_chat_muted(chat_id):
+            if data.get("is_group"):
+                self.sound.play_group_received()
+            elif data.get("is_channel"):
+                self.sound.play_channel_received()
+            else:
+                self.sound.play_received()
         sender = data.get("sender_name", "Someone")
         preview = data.get("text", "")
         if data.get("is_voice"):
@@ -815,7 +903,9 @@ class MainFrame(wx.Frame):
             preview = "Media" if data.get("is_media") else "Message"
         else:
             preview = preview[:60]
-        self.SetStatusText(f"New message from {sender}: {preview}")
+        status = f"New message from {sender}: {preview}"
+        self.SetStatusText(status)
+        self._msg_frame.SetStatusText(status)
         if self._current_entity:
             current_id = getattr(self._current_entity, "id", None)
             if current_id and data["chat_id"] == current_id:
@@ -863,7 +953,9 @@ class MainFrame(wx.Frame):
             )
             return
         entity = self._current_entity
-        self.SetStatusText("Calling...")
+        status = "Calling..."
+        self.SetStatusText(status)
+        self._msg_frame.SetStatusText(status)
         threading.Thread(
             target=self._request_call_thread,
             args=(entity,),
@@ -875,7 +967,10 @@ class MainFrame(wx.Frame):
             self.tg.submit_wait(self.calls.request_call(entity))
         except Exception as e:
             log.error("Call failed: %s", e)
-            wx.CallAfter(self.SetStatusText, f"Call failed: {e}")
+            def _update_status(msg=f"Call failed: {e}"):
+                self.SetStatusText(msg)
+                self._msg_frame.SetStatusText(msg)
+            wx.CallAfter(_update_status)
 
     def _on_hangup(self, event):
         if self.calls.in_call:
@@ -884,6 +979,7 @@ class MainFrame(wx.Frame):
             ).start()
         else:
             self.SetStatusText("No active call")
+            self._msg_frame.SetStatusText("No active call")
 
     def _hangup_thread(self):
         try:
@@ -898,7 +994,9 @@ class MainFrame(wx.Frame):
             "ended": "Call ended",
             "error": f"Call error: {data}",
         }
-        self.SetStatusText(status_map.get(state, state))
+        status = status_map.get(state, state)
+        self.SetStatusText(status)
+        self._msg_frame.SetStatusText(status)
 
     # ---------------------------------------------------------- Settings
 
@@ -911,6 +1009,199 @@ class MainFrame(wx.Frame):
                 self.config["sound_pack"] = dlg.GetSoundPack()
                 self.config.save()
                 self.sound.set_output_device(dlg.GetOutputDeviceIndex())
+
+    # ---------------------------------------------------- Profile / Mute
+
+    def _on_profile(self, event):
+        self.SetStatusText("Loading profile...")
+        threading.Thread(
+            target=self._load_profile_thread, daemon=True
+        ).start()
+
+    def _load_profile_thread(self):
+        try:
+            me = self.tg.submit_wait(self.tg.get_me())
+            full = self.tg.submit_wait(self.tg.get_full_me())
+            user_info = {
+                "first_name": getattr(me, "first_name", "") or "",
+                "last_name": getattr(me, "last_name", "") or "",
+                "username": getattr(me, "username", "") or "",
+                "phone": getattr(me, "phone", "") or "",
+                "bio": getattr(full.full_user, "about", "") or "",
+            }
+            wx.CallAfter(self._show_profile_dialog, user_info)
+        except Exception as e:
+            log.error("Failed to load profile: %s", e)
+            wx.CallAfter(
+                self._show_error, f"Failed to load profile:\n{e}"
+            )
+            wx.CallAfter(self.SetStatusText, "Ready")
+
+    def _show_profile_dialog(self, user_info):
+        from .profile_dialog import ProfileDialog
+
+        self.SetStatusText("Ready")
+        with ProfileDialog(self, user_info) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                changes = {}
+                new_first = dlg.GetFirstName()
+                new_last = dlg.GetLastName()
+                new_bio = dlg.GetBio()
+                if new_first != user_info["first_name"]:
+                    changes["first_name"] = new_first
+                if new_last != user_info["last_name"]:
+                    changes["last_name"] = new_last
+                if new_bio != user_info["bio"]:
+                    changes["about"] = new_bio
+                if changes:
+                    self.SetStatusText("Updating profile...")
+                    threading.Thread(
+                        target=self._update_profile_thread,
+                        args=(changes,),
+                        daemon=True,
+                    ).start()
+
+    def _update_profile_thread(self, changes):
+        try:
+            self.tg.submit_wait(self.tg.update_profile(**changes))
+            if "first_name" in changes:
+                me = self.tg.submit_wait(self.tg.get_me())
+                name = getattr(me, "first_name", "User") or "User"
+                wx.CallAfter(self.SetTitle, f"Teepee - {name}")
+            wx.CallAfter(self.SetStatusText, "Profile updated")
+        except Exception as e:
+            log.error("Failed to update profile: %s", e)
+            wx.CallAfter(
+                self._show_error, f"Failed to update profile:\n{e}"
+            )
+            wx.CallAfter(self.SetStatusText, "Ready")
+
+    def _on_mute_chat(self, event):
+        dialog = self.chat_list.get_selected_dialog()
+        if not dialog:
+            wx.MessageBox(
+                "Select a chat first.",
+                "Mute Chat",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            return
+        from .theme import apply_theme
+
+        choices = [
+            "1 hour",
+            "8 hours",
+            "1 day",
+            "1 week",
+            "Permanently",
+        ]
+        dlg = wx.SingleChoiceDialog(
+            self, "Mute notifications for:", "Mute Chat", choices
+        )
+        apply_theme(dlg)
+        if dlg.ShowModal() != wx.ID_OK:
+            dlg.Destroy()
+            return
+        selection = dlg.GetSelection()
+        dlg.Destroy()
+
+        import time
+
+        now = int(time.time())
+        mute_times = [
+            now + 3600,
+            now + 28800,
+            now + 86400,
+            now + 604800,
+            2147483647,
+        ]
+        mute_until = mute_times[selection]
+        entity = dialog.entity
+        chat_id = getattr(entity, "id", None)
+        if chat_id:
+            from datetime import datetime, timezone
+
+            self._muted_chats[chat_id] = datetime.fromtimestamp(
+                mute_until, tz=timezone.utc
+            )
+        threading.Thread(
+            target=self._mute_chat_thread,
+            args=(entity, mute_until),
+            daemon=True,
+        ).start()
+
+    def _mute_chat_thread(self, entity, mute_until):
+        try:
+            self.tg.submit_wait(self.tg.mute_chat(entity, mute_until))
+            wx.CallAfter(self._on_mute_done)
+        except Exception as e:
+            log.error("Failed to mute chat: %s", e)
+            wx.CallAfter(
+                self._show_error, f"Failed to mute chat:\n{e}"
+            )
+
+    def _on_mute_done(self):
+        self.SetStatusText("Chat muted")
+        self._msg_frame.SetStatusText("Chat muted")
+        self._load_dialogs()
+
+    def _on_unmute_chat(self, event):
+        dialog = self.chat_list.get_selected_dialog()
+        if not dialog:
+            wx.MessageBox(
+                "Select a chat first.",
+                "Unmute Chat",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            return
+        entity = dialog.entity
+        chat_id = getattr(entity, "id", None)
+        if chat_id:
+            self._muted_chats.pop(chat_id, None)
+        threading.Thread(
+            target=self._unmute_chat_thread,
+            args=(entity,),
+            daemon=True,
+        ).start()
+
+    def _unmute_chat_thread(self, entity):
+        try:
+            self.tg.submit_wait(self.tg.unmute_chat(entity))
+            wx.CallAfter(self._on_unmute_done)
+        except Exception as e:
+            log.error("Failed to unmute chat: %s", e)
+            wx.CallAfter(
+                self._show_error, f"Failed to unmute chat:\n{e}"
+            )
+
+    def _on_unmute_done(self):
+        self.SetStatusText("Chat unmuted")
+        self._msg_frame.SetStatusText("Chat unmuted")
+        self._load_dialogs()
+
+    def _is_chat_muted(self, chat_id):
+        mute_until = self._muted_chats.get(chat_id)
+        if not mute_until:
+            return False
+        from datetime import datetime, timezone
+
+        return mute_until > datetime.now(tz=timezone.utc)
+
+    def _update_muted_chats(self):
+        self._muted_chats.clear()
+        from datetime import datetime, timezone
+
+        now = datetime.now(tz=timezone.utc)
+        for d in self._dialogs:
+            ns = getattr(d.dialog, "notify_settings", None)
+            if not ns:
+                continue
+            mute_until = getattr(ns, "mute_until", None)
+            if mute_until and mute_until > now:
+                chat_id = getattr(d.entity, "id", None)
+                if chat_id:
+                    self._muted_chats[chat_id] = mute_until
 
     # ------------------------------------------------------- Group Actions
 
@@ -960,6 +1251,7 @@ class MainFrame(wx.Frame):
 
     def _on_group_joined(self, target):
         self.SetStatusText(f"Joined {target}")
+        self._msg_frame.SetStatusText(f"Joined {target}")
         self._load_dialogs()
 
     def _on_leave_group(self, event):
@@ -1006,10 +1298,14 @@ class MainFrame(wx.Frame):
         self._current_entity = None
         self._current_messages = []
         self._shown_msg_ids.clear()
+        self.message_panel.clear_reply()
+        self.message_panel._clear_inline_buttons()
         self.message_panel.set_enabled(False)
         self.message_panel.messages_list.Clear()
+        self._msg_frame.Hide()
         self.SetStatusText("Left group")
         self._load_dialogs()
+        self.Raise()
         self.chat_list.list_ctrl.SetFocus()
 
     def _on_view_members(self, event):
@@ -1109,7 +1405,10 @@ class MainFrame(wx.Frame):
         try:
             user = self.tg.submit_wait(self.tg.get_entity(username))
             self.tg.submit_wait(self.tg.kick_participant(entity, user))
-            wx.CallAfter(self.SetStatusText, f"Kicked {username}")
+            def _on_kicked(u=username):
+                self.SetStatusText(f"Kicked {u}")
+                self._msg_frame.SetStatusText(f"Kicked {u}")
+            wx.CallAfter(_on_kicked)
         except Exception as e:
             log.error("Failed to kick member: %s", e)
             wx.CallAfter(
@@ -1156,7 +1455,10 @@ class MainFrame(wx.Frame):
     def _edit_title_thread(self, entity, new_title):
         try:
             self.tg.submit_wait(self.tg.edit_chat_title(entity, new_title))
-            wx.CallAfter(self.SetStatusText, f"Title changed to: {new_title}")
+            def _on_title_changed(t=new_title):
+                self.SetStatusText(f"Title changed to: {t}")
+                self._msg_frame.SetStatusText(f"Title changed to: {t}")
+            wx.CallAfter(_on_title_changed)
             wx.CallAfter(self._load_dialogs)
         except Exception as e:
             log.error("Failed to edit title: %s", e)
@@ -1169,11 +1471,12 @@ class MainFrame(wx.Frame):
     # ------------------------------------------------------------ Other
 
     def _show_error(self, message, title="Error"):
-        wx.MessageBox(message, title, wx.OK | wx.ICON_ERROR, self)
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        wx.MessageBox(message, title, wx.OK | wx.ICON_ERROR, parent)
 
     def _on_about(self, event):
         wx.MessageBox(
-            "Teepee v2516\n\nThe simple, speedy Telegram client with the blind in mind.",
+            "Teepee v2516.1\n\nThe simple, speedy Telegram client with the blind in mind.",
             "About Teepee",
             wx.OK | wx.ICON_INFORMATION,
             self,
@@ -1186,18 +1489,21 @@ class MainFrame(wx.Frame):
             "  Ctrl+2: Focus message list\n"
             "  Ctrl+3: Focus message input\n\n"
             "Messaging:\n"
-            "  Enter: Send message (in input field)\n"
+            "  Enter: Open selected chat (in chat list) or send message (in input field)\n"
             "  Shift+Enter: New line in message\n"
             "  Ctrl+R: Reply to selected message\n"
-            "  Escape: Cancel reply\n"
+            "  Escape: Cancel reply or close chat view\n"
             "  Delete: Delete selected message or chat\n\n"
             "Calls:\n"
             "  Ctrl+Shift+C: Start voice call\n"
             "  Ctrl+Shift+H: Hang up\n\n"
+            "Voice:\n"
+            "  Press the Voice button to start recording, press Stop to send\n\n"
             "Other:\n"
             "  Ctrl+,: Settings\n"
             "  Alt+F4: Minimize to system tray\n"
-            "  Ctrl+Q: Quit"
+            "  Ctrl+Q: Quit\n\n"
+            "Tip: Press the Applications key or Shift+F10 on a chat to mute, unmute, or delete it."
         )
         wx.MessageBox(
             shortcuts,
@@ -1219,6 +1525,9 @@ class MainFrame(wx.Frame):
     def _minimize_to_tray(self):
         if not self._tray_icon:
             self._tray_icon = TeepeeTaskBarIcon(self)
+        self._msg_frame_was_shown = self._msg_frame.IsShown()
+        if self._msg_frame_was_shown:
+            self._msg_frame.Hide()
         self.Hide()
         try:
             self._tray_icon.ShowBalloon(
@@ -1232,11 +1541,17 @@ class MainFrame(wx.Frame):
         self.Show()
         self.Restore()
         self.Raise()
+        if self._msg_frame_was_shown:
+            self._msg_frame.Show()
+            self._msg_frame.Raise()
         if self._tray_icon:
             self._tray_icon.RemoveIcon()
             self._tray_icon.Destroy()
             self._tray_icon = None
-        self.chat_list.list_ctrl.SetFocus()
+        if self._msg_frame_was_shown:
+            self.message_panel.messages_list.SetFocus()
+        else:
+            self.chat_list.list_ctrl.SetFocus()
 
     def quit(self):
         self._force_quit = True

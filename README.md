@@ -9,10 +9,13 @@ Teepee is a lightweight desktop Telegram client built with wxPython and designed
 ## Features
 
 - Send and receive text messages, voice messages, and media.
+- Messages open in a separate window when you select a chat, keeping the chat list always visible.
 - Browse your chat list with a live search filter.
 - Reply to, delete, and manage messages with keyboard shortcuts.
 - Record and send voice messages directly from the app.
 - Play received voice messages inline.
+- View and edit your Telegram profile, including first name, last name, and bio, from the File menu.
+- Mute chat notifications temporarily (1 hour, 8 hours, 1 day, 1 week) or permanently. Muted chats are labelled in the chat list and produce no notification sounds.
 - Join, leave, and manage groups and channels, including viewing members, kicking users, and editing group titles.
 - Interact with bot inline buttons for bots that support it.
 - Start voice calls with contacts.
@@ -22,6 +25,7 @@ Teepee is a lightweight desktop Telegram client built with wxPython and designed
 - Keyboard friendly navigation with tab, arrow keys, and area shortcuts (Ctrl+1 for chat list, Ctrl+2 for messages, Ctrl+3 for message input).
 - A Keyboard Shortcuts reference available from the Help menu or by pressing F1.
 - Detects if your system is in dark mode and applies a dark theme to suit, including dark title bars on Windows.
+- Right-click context menu on the chat list for quick access to mute, unmute, and delete actions.
 
 ## Installation
 
@@ -81,7 +85,7 @@ The output is placed in the dist folder.
 
 ## Telegram API credentials
 
-Teepee needs a Telegram API ID and Hash to connect. Official Teepee builds already have these credentials built in, but if credentials are not embedded in your own custom build, the app will prompt you to enter them on first launch.
+Teepee needs a Telegram API ID and API Hash to connect. If credentials are not already embedded in your own custom build, the app will prompt you to enter them on first launch.
 
 To get your own credentials:
 
@@ -104,8 +108,8 @@ uv run python setup_credentials.py
 
 ### Sending messages
 
-1. Select a chat from the chat list on the left, or press the New Chat button to start a conversation with a user by username or phone number.
-2. Type your message in the message input field at the bottom.
+1. Select a chat from the chat list. A separate message window opens with the conversation.
+2. Type your message in the message input field at the bottom of the message window.
 3. Press Enter to send, or Shift+Enter to add a new line.
 
 ### Voice messages
@@ -149,3 +153,13 @@ From the Group menu you can:
 ### Settings
 
 Press Ctrl+, or open the Settings menu to configure audio input and output devices and toggle notification sounds.
+
+### Profile
+
+Open File then My Profile to view your Telegram profile. You can edit your first name, last name, and bio. Username and phone number are displayed as read-only fields.
+
+### Chat muting
+
+To mute a chat, select it in the chat list and choose Chat then Mute Chat from the menu bar, or right-click the chat and select Mute Chat. Pick a duration: 1 hour, 8 hours, 1 day, 1 week, or permanently. Muted chats show a [Muted] label in the chat list and will not play notification sounds for incoming messages.
+
+To unmute, select the chat and choose Chat then Unmute Chat, or right-click and select Unmute Chat.

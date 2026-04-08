@@ -118,6 +118,49 @@ class TelegramManager:
     async def get_me(self):
         return await self.client.get_me()
 
+    async def get_full_me(self):
+        from telethon.tl.functions.users import GetFullUserRequest
+        from telethon.tl.types import InputUserSelf
+
+        result = await self.client(GetFullUserRequest(InputUserSelf()))
+        return result
+
+    async def update_profile(self, first_name=None, last_name=None, about=None):
+        from telethon.tl.functions.account import UpdateProfileRequest
+
+        kwargs = {}
+        if first_name is not None:
+            kwargs["first_name"] = first_name
+        if last_name is not None:
+            kwargs["last_name"] = last_name
+        if about is not None:
+            kwargs["about"] = about
+        return await self.client(UpdateProfileRequest(**kwargs))
+
+    async def mute_chat(self, entity, mute_until):
+        from telethon.tl.functions.account import UpdateNotifySettingsRequest
+        from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
+
+        peer = await self.client.get_input_entity(entity)
+        return await self.client(
+            UpdateNotifySettingsRequest(
+                peer=InputNotifyPeer(peer=peer),
+                settings=InputPeerNotifySettings(mute_until=mute_until),
+            )
+        )
+
+    async def unmute_chat(self, entity):
+        from telethon.tl.functions.account import UpdateNotifySettingsRequest
+        from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
+
+        peer = await self.client.get_input_entity(entity)
+        return await self.client(
+            UpdateNotifySettingsRequest(
+                peer=InputNotifyPeer(peer=peer),
+                settings=InputPeerNotifySettings(mute_until=0),
+            )
+        )
+
     async def disconnect(self):
         if self.client and self.client.is_connected():
             try:
