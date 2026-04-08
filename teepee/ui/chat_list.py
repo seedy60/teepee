@@ -66,14 +66,14 @@ class ChatListPanel(wx.Panel):
         msg = dialog.message
         if msg:
             if msg.voice:
-                preview = " Voice message"
+                preview = ": Voice message"
             elif msg.text:
                 text = msg.text.replace("\n", " ")
                 if len(text) > 40:
                     text = text[:40] + "..."
-                preview = f" {text}"
+                preview = f": {text}"
             elif msg.media:
-                preview = f" [{self._media_label(msg.media)}]"
+                preview = f": [{self._media_label(msg.media)}]"
         return f"{name}{muted}{unread}{preview}"
 
     @staticmethod
@@ -162,6 +162,10 @@ class ChatListPanel(wx.Panel):
         menu = wx.Menu()
         mute_item = menu.Append(wx.ID_ANY, "&Mute Chat...")
         unmute_item = menu.Append(wx.ID_ANY, "&Unmute Chat")
+        if idx < len(self._filtered_dialogs):
+            chat_id = getattr(self._filtered_dialogs[idx].entity, "id", None)
+            if chat_id not in self._muted_ids:
+                unmute_item.Enable(False)
         menu.AppendSeparator()
         delete_item = menu.Append(wx.ID_ANY, "&Delete Chat")
         self.Bind(wx.EVT_MENU, self._on_ctx_mute, mute_item)

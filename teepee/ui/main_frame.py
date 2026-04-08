@@ -566,6 +566,7 @@ class MainFrame(wx.Frame):
                     self.message_panel.messages_list.SetFocus()
                 else:
                     self.message_panel.input_ctrl.SetFocus()
+            self._load_dialogs()
 
     def on_message_selected(self):
         idx = self.message_panel.get_selected_message_index()
@@ -693,6 +694,8 @@ class MainFrame(wx.Frame):
             preview = "[Message]"
         self.message_panel.set_reply(msg, preview)
         self.message_panel.input_ctrl.SetFocus()
+        self.SetStatusText(f"Replying to: {preview}")
+        self._msg_frame.SetStatusText(f"Replying to: {preview}")
 
     def delete_selected_message(self):
         idx = self.message_panel.get_selected_message_index()
@@ -833,6 +836,9 @@ class MainFrame(wx.Frame):
                 args=(entity, file_path),
                 daemon=True,
             ).start()
+        elif not file_path:
+            self.SetStatusText("Recording failed")
+            self._msg_frame.SetStatusText("Recording failed")
 
     def _send_voice_thread(self, entity, file_path):
         try:
