@@ -339,6 +339,10 @@ class MainFrame(wx.Frame):
                 if self._current_entity and self._msg_frame.IsShown():
                     self.message_panel._on_attach(event)
                 return
+            if key == ord("S"):
+                if self._current_entity and self._msg_frame.IsShown():
+                    self.save_selected_media()
+                return
 
         event.Skip()
 
@@ -623,9 +627,13 @@ class MainFrame(wx.Frame):
                 )
             else:
                 self.message_panel.show_play_button(False)
+            self.message_panel.show_save_button(
+                self._has_downloadable_media(last_msg)
+            )
         else:
             self.message_panel.update_inline_buttons(None)
             self.message_panel.show_play_button(False)
+            self.message_panel.show_save_button(False)
         name = (
             getattr(entity, "first_name", None)
             or getattr(entity, "title", None)
@@ -654,6 +662,7 @@ class MainFrame(wx.Frame):
         if idx == wx.NOT_FOUND:
             self.message_panel.update_inline_buttons(None)
             self.message_panel.show_play_button(False)
+            self.message_panel.show_save_button(False)
             return
         msg_idx = len(self._current_messages) - 1 - idx
         if 0 <= msg_idx < len(self._current_messages):
@@ -673,9 +682,13 @@ class MainFrame(wx.Frame):
                 )
             else:
                 self.message_panel.show_play_button(False)
+            self.message_panel.show_save_button(
+                self._has_downloadable_media(msg)
+            )
         else:
             self.message_panel.update_inline_buttons(None)
             self.message_panel.show_play_button(False)
+            self.message_panel.show_save_button(False)
 
     def on_inline_button_click(self, msg, tl_button):
         from telethon.tl.types import KeyboardButtonUrl
@@ -1068,6 +1081,104 @@ class MainFrame(wx.Frame):
         except Exception as e:
             log.error("Failed to open video: %s", e)
             self._show_error(f"Failed to open video:\n{e}")
+
+    # -------------------------------------------------- Download / Save
+
+    @staticmethod
+    def _has_downloadable_media(msg):
+        return bool(
+            msg.voice
+            or msg.audio
+            or msg.video
+            or msg.video_note
+            or msg.photo
+            or msg.document
+        )
+
+    @staticmethod
+    def _suggested_filename(msg):
+        if msg.document:
+            for attr in getattr(msg.document, "attributes", []):
+                name = getattr(attr, "file_name", None)
+                if name:
+                    return name
+        if msg.voice:
+            return f"voice_{msg.id}.ogg"
+        if msg.audio:
+            return f"audio_{msg.id}.mp3"
+        if msg.video or msg.video_note:
+            return f"video_{msg.id}.mp4"
+        if msg.photo:
+            return f"photo_{msg.id}.jpg"
+        return f"file_{msg.id}"
+
+    def save_selected_media(self):
+        idx = self.message_panel.get_selected_message_index()
+        if idx == wx.NOT_FOUND:
+            parent = self._msg_frame if self._msg_frame.IsShown() else self
+            wx.MessageBox(
+                "Select a message with media to save.",
+                "Save",
+                wx.OK | wx.ICON_INFORMATION,
+                parent,
+            )
+            return
+        msg_idx = len(self._current_messages) - 1 - idx
+        if msg_idx < 0 or msg_idx >= len(self._current_messages):
+            return
+        msg = self._current_messages[msg_idx]
+        if not self._has_downloadable_media(msg):
+            parent = self._msg_frame if self._msg_frame.IsShown() else self
+            wx.MessageBox(
+                "The selected message has no downloadable media.",
+                "Save",
+                wx.OK | wx.ICON_INFORMATION,
+                parent,
+            )
+            return
+        suggested = self._suggested_filename(msg)
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        with wx.FileDialog(
+            parent,
+            "Save file",
+            defaultFile=suggested,
+            wildcard="All files (*.*)|*.*",
+            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            save_path = dlg.GetPath()
+        self.SetStatusText("Downloading...")
+        self._msg_frame.SetStatusText("Downloading...")
+        threading.Thread(
+            target=self._save_media_thread,
+            args=(msg, save_path),
+            daemon=True,
+        ).start()
+
+    def _save_media_thread(self, msg, save_path):
+        try:
+            result = self.tg.submit_wait(
+                self.tg.download_media(msg, save_path)
+            )
+            if result:
+                name = os.path.basename(save_path)
+                wx.CallAfter(self.SetStatusText, f"Saved {name}")
+                wx.CallAfter(
+                    self._msg_frame.SetStatusText, f"Saved {name}"
+                )
+            else:
+                wx.CallAfter(self.SetStatusText, "Download failed")
+                wx.CallAfter(
+                    self._msg_frame.SetStatusText, "Download failed"
+                )
+        except Exception as e:
+            log.error("Failed to save media: %s", e)
+            wx.CallAfter(
+                self._show_error, f"Failed to save file:\n{e}"
+            )
+            wx.CallAfter(self.SetStatusText, "Ready")
+            wx.CallAfter(self._msg_frame.SetStatusText, "Ready")
 
     # --------------------------------------------------- Real-time events
 
@@ -2066,7 +2177,9 @@ class MainFrame(wx.Frame):
             "Voice and Media:\n"
             "  Press the Voice button to start recording, press Stop to send\n"
             "  Press Play on a voice message, audio, or video to play it\n"
-            "  Audio plays inline, video opens in your default player\n\n"
+            "  Audio plays inline, video opens in your default player\n"
+            "  Ctrl+Shift+S: Save the selected voice message or file attachment\n"
+            "  Press the Save button on a message with media to download it\n\n"
             "Chat Management (Chat menu):\n"
             "  Mute/Unmute: Mute or unmute the selected chat's notifications\n\n"
             "Groups and Channels (Group menu):\n"

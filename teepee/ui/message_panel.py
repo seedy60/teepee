@@ -60,6 +60,30 @@ class MessagePanel(wx.Panel):
         sizer.Add(self.reply_sizer, 0, wx.EXPAND)
         sizer.Hide(self.reply_sizer)
 
+        # --- Message action buttons (Play, Save, Delete, Reply) ---
+        self.msg_actions_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        self.play_btn = wx.Button(self, label="&Play")
+        self.play_btn.SetToolTip("Play the selected voice message")
+        self.msg_actions_sizer.Add(self.play_btn, 0, wx.ALL, 2)
+        self.play_btn.Hide()
+
+        self.save_btn = wx.Button(self, label="Sa&ve")
+        self.save_btn.SetToolTip("Save the selected file or voice message")
+        self.msg_actions_sizer.Add(self.save_btn, 0, wx.ALL, 2)
+        self.save_btn.Hide()
+
+        self.delete_msg_btn = wx.Button(self, label="&Delete")
+        self.delete_msg_btn.SetToolTip("Delete the selected message")
+        self.msg_actions_sizer.Add(self.delete_msg_btn, 0, wx.ALL, 2)
+
+        self.reply_btn = wx.Button(self, label="&Reply")
+        self.reply_btn.SetToolTip("Reply to the selected message")
+        self.msg_actions_sizer.Add(self.reply_btn, 0, wx.ALL, 2)
+
+        sizer.Add(self.msg_actions_sizer, 0, wx.LEFT | wx.RIGHT, 5)
+        sizer.Hide(self.msg_actions_sizer)
+
         # --- Input area (hidden initially) ---
         self.input_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
@@ -84,19 +108,6 @@ class MessagePanel(wx.Panel):
         self.voice_btn.SetToolTip("Record a voice message")
         btn_sizer.Add(self.voice_btn, 0, wx.ALL, 2)
 
-        self.play_btn = wx.Button(self, label="&Play")
-        self.play_btn.SetToolTip("Play the selected voice message")
-        btn_sizer.Add(self.play_btn, 0, wx.ALL, 2)
-        self.play_btn.Hide()
-
-        self.delete_msg_btn = wx.Button(self, label="&Delete")
-        self.delete_msg_btn.SetToolTip("Delete the selected message")
-        btn_sizer.Add(self.delete_msg_btn, 0, wx.ALL, 2)
-
-        self.reply_btn = wx.Button(self, label="&Reply")
-        self.reply_btn.SetToolTip("Reply to the selected message")
-        btn_sizer.Add(self.reply_btn, 0, wx.ALL, 2)
-
         self.input_sizer.Add(btn_sizer, 0, wx.ALIGN_BOTTOM)
 
         sizer.Add(self.input_sizer, 0, wx.EXPAND)
@@ -108,6 +119,7 @@ class MessagePanel(wx.Panel):
         self.attach_btn.Bind(wx.EVT_BUTTON, self._on_attach)
         self.voice_btn.Bind(wx.EVT_BUTTON, self._on_voice)
         self.play_btn.Bind(wx.EVT_BUTTON, self._on_play)
+        self.save_btn.Bind(wx.EVT_BUTTON, self._on_save)
         self.delete_msg_btn.Bind(wx.EVT_BUTTON, self._on_delete_message)
         self.reply_btn.Bind(wx.EVT_BUTTON, self._on_reply)
         self.cancel_reply_btn.Bind(wx.EVT_BUTTON, self._on_cancel_reply)
@@ -120,6 +132,7 @@ class MessagePanel(wx.Panel):
         sizer = self.GetSizer()
         sizer.Show(self.messages_label)
         sizer.Show(self.messages_list)
+        sizer.Show(self.msg_actions_sizer)
         sizer.Show(self.input_sizer)
         sizer.Layout()
 
@@ -290,6 +303,9 @@ class MessagePanel(wx.Panel):
     def _on_play(self, event):
         self.frame.play_last_voice()
 
+    def _on_save(self, event):
+        self.frame.save_selected_media()
+
     def _on_reply(self, event):
         self.frame.reply_to_selected_message()
 
@@ -329,18 +345,30 @@ class MessagePanel(wx.Panel):
             self.play_btn.SetToolTip(tooltip)
             if not self.play_btn.IsShown():
                 self.play_btn.Show()
-                self.input_sizer.Layout()
+                self.msg_actions_sizer.Layout()
         elif not show and self.play_btn.IsShown():
             if wx.Window.FindFocus() is self.play_btn:
                 self.messages_list.SetFocus()
             self.play_btn.Hide()
-            self.input_sizer.Layout()
+            self.msg_actions_sizer.Layout()
+
+    def show_save_button(self, show):
+        if show:
+            if not self.save_btn.IsShown():
+                self.save_btn.Show()
+                self.msg_actions_sizer.Layout()
+        elif self.save_btn.IsShown():
+            if wx.Window.FindFocus() is self.save_btn:
+                self.messages_list.SetFocus()
+            self.save_btn.Hide()
+            self.msg_actions_sizer.Layout()
 
     def set_enabled(self, enabled):
         self.input_ctrl.Enable(enabled)
         self.send_btn.Enable(enabled)
         self.attach_btn.Enable(enabled)
         self.voice_btn.Enable(enabled)
+        self.save_btn.Enable(enabled)
         self.delete_msg_btn.Enable(enabled)
         self.reply_btn.Enable(enabled)
         if not enabled:

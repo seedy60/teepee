@@ -74,6 +74,9 @@ class MessageFrame(wx.Frame):
             if key == ord("A"):
                 self.message_panel._on_attach(event)
                 return
+            if key == ord("S"):
+                self.main_frame.save_selected_media()
+                return
 
         if event.ControlDown() and not event.ShiftDown() and not event.AltDown():
             if key == ord("1"):

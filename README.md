@@ -19,6 +19,7 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 - Send files using the Attach button or Ctrl+Shift+A.
 - Play received voice messages and audio files inline.
 - Play received video files in your default media player.
+- Download and save voice messages, photos, videos, audio files, and document attachments using the Save button or Ctrl+Shift+S.
 - Media types (audio, video, sticker, GIF, document) are clearly labelled in the message list and chat previews.
 - Interact with bot inline buttons for bots that support it.
 - Unread message counts are shown in the chat list and cleared automatically when you open a chat.
@@ -167,6 +168,7 @@ uv run python setup_credentials.py
 2. Press the Stop button (the same button) to stop recording and send the voice message.
 3. To play a received voice message or audio file, select it in the message list and press the Play button. Audio plays inline.
 4. To play a received video, select it and press the Play button. The video opens in your default media player.
+5. To save a voice message, photo, video, audio file, or document, select the message and press the Save button or use Ctrl+Shift+S. Choose where to save the file in the file picker.
 
 ### Sending files
 
@@ -189,6 +191,7 @@ The following table lists all keyboard shortcuts grouped by category.
 | Shift+Enter | New line in message |
 | Ctrl+R | Reply to selected message |
 | Ctrl+Shift+A | Attach and send a file |
+| Ctrl+Shift+S | Save the selected voice message or file attachment |
 | Escape | Cancel reply |
 | Delete | Delete selected message or chat (choose delete for me or for everyone) |
 | Ctrl+Shift+C | Start voice call |
