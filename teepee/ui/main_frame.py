@@ -21,6 +21,44 @@ from .settings_dialog import SettingsDialog
 log = logging.getLogger(__name__)
 
 
+class DeleteScopeDialog(wx.Dialog):
+    def __init__(self, parent, title, message):
+        super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE)
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        sizer.Add(wx.StaticText(self, label=message), flag=wx.ALL, border=10)
+
+        self.for_me = wx.RadioButton(
+            self, label="Delete for &me only", style=wx.RB_GROUP
+        )
+        self.for_everyone = wx.RadioButton(
+            self, label="Delete for &everyone"
+        )
+        self.for_me.SetValue(True)
+
+        sizer.Add(self.for_me, flag=wx.LEFT | wx.RIGHT, border=10)
+        sizer.Add(
+            self.for_everyone,
+            flag=wx.LEFT | wx.RIGHT | wx.TOP,
+            border=5,
+        )
+
+        btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        self.SetSizerAndFit(sizer)
+        self.CenterOnParent()
+        self.for_me.SetFocus()
+
+        from .theme import apply_theme
+
+        apply_theme(self)
+
+    def GetRevoke(self):
+        return self.for_everyone.GetValue()
+
+
 def _make_tray_icon():
     """Create a simple 16x16 tray icon with a 'T' on a blue background."""
     bmp = wx.Bitmap(16, 16)
@@ -86,6 +124,7 @@ class MainFrame(wx.Frame):
         self._shown_msg_ids = set()
         self._muted_chats = {}
         self._pending_chat_focus = False
+        self._media_cache = {}
 
         self._create_ui()
         self._create_menu()
@@ -130,11 +169,11 @@ class MainFrame(wx.Frame):
         menubar = wx.MenuBar()
 
         file_menu = wx.Menu()
-        self._profile_id = wx.NewIdRef()
+        self._account_id = wx.NewIdRef()
         file_menu.Append(
-            self._profile_id,
-            "My &Profile...",
-            "View and edit your Telegram profile",
+            self._account_id,
+            "My &Account...",
+            "View and edit your Telegram account settings",
         )
         file_menu.AppendSeparator()
         file_menu.Append(wx.ID_EXIT, "&Quit\tCtrl+Q")
@@ -167,6 +206,19 @@ class MainFrame(wx.Frame):
         menubar.Append(tools_menu, "&Tools")
 
         group_menu = wx.Menu()
+        self._create_group_id = wx.NewIdRef()
+        group_menu.Append(
+            self._create_group_id,
+            "Create &Group...",
+            "Create a new group chat",
+        )
+        self._create_channel_id = wx.NewIdRef()
+        group_menu.Append(
+            self._create_channel_id,
+            "Create C&hannel...",
+            "Create a new channel",
+        )
+        group_menu.AppendSeparator()
         self._join_id = wx.NewIdRef()
         group_menu.Append(
             self._join_id,
@@ -180,6 +232,12 @@ class MainFrame(wx.Frame):
             "Leave the currently selected group or channel",
         )
         group_menu.AppendSeparator()
+        self._invite_id = wx.NewIdRef()
+        group_menu.Append(
+            self._invite_id,
+            "&Invite User...",
+            "Invite a user to the selected group or channel",
+        )
         self._members_id = wx.NewIdRef()
         group_menu.Append(
             self._members_id,
@@ -223,7 +281,7 @@ class MainFrame(wx.Frame):
         self.SetMenuBar(menubar)
 
         self.Bind(wx.EVT_MENU, self._on_exit, id=wx.ID_EXIT)
-        self.Bind(wx.EVT_MENU, self._on_profile, id=self._profile_id)
+        self.Bind(wx.EVT_MENU, self._on_account, id=self._account_id)
         self.Bind(wx.EVT_MENU, self._on_mute_chat, id=self._mute_id)
         self.Bind(wx.EVT_MENU, self._on_unmute_chat, id=self._unmute_id)
         self.Bind(wx.EVT_MENU, self._on_call, id=self._call_id)
@@ -233,6 +291,9 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self._on_about, id=wx.ID_ABOUT)
         self.Bind(wx.EVT_MENU, self._on_join_group, id=self._join_id)
         self.Bind(wx.EVT_MENU, self._on_leave_group, id=self._leave_id)
+        self.Bind(wx.EVT_MENU, self._on_create_group, id=self._create_group_id)
+        self.Bind(wx.EVT_MENU, self._on_create_channel, id=self._create_channel_id)
+        self.Bind(wx.EVT_MENU, self._on_invite_user, id=self._invite_id)
         self.Bind(wx.EVT_MENU, self._on_view_members, id=self._members_id)
         self.Bind(wx.EVT_MENU, self._on_kick_member, id=self._kick_id)
         self.Bind(wx.EVT_MENU, self._on_edit_title, id=self._edit_title_id)
@@ -271,6 +332,12 @@ class MainFrame(wx.Frame):
                 if self._msg_frame.IsShown():
                     self._msg_frame.Raise()
                     self.message_panel.input_ctrl.SetFocus()
+                return
+
+        if event.ControlDown() and event.ShiftDown() and not event.AltDown():
+            if key == ord("A"):
+                if self._current_entity and self._msg_frame.IsShown():
+                    self.message_panel._on_attach(event)
                 return
 
         event.Skip()
@@ -541,7 +608,21 @@ class MainFrame(wx.Frame):
         # Show inline buttons for the last message if it has markup
         if messages:
             self.message_panel.update_inline_buttons(messages[0])
-            self.message_panel.show_play_button(bool(messages[0].voice))
+            last_msg = messages[0]
+            if last_msg.voice:
+                self.message_panel.show_play_button(
+                    True, "&Play", "Play the selected voice message"
+                )
+            elif last_msg.audio:
+                self.message_panel.show_play_button(
+                    True, "&Play", "Play the selected audio file"
+                )
+            elif last_msg.video or last_msg.video_note:
+                self.message_panel.show_play_button(
+                    True, "&Play", "Play the selected video"
+                )
+            else:
+                self.message_panel.show_play_button(False)
         else:
             self.message_panel.update_inline_buttons(None)
             self.message_panel.show_play_button(False)
@@ -578,7 +659,20 @@ class MainFrame(wx.Frame):
         if 0 <= msg_idx < len(self._current_messages):
             msg = self._current_messages[msg_idx]
             self.message_panel.update_inline_buttons(msg)
-            self.message_panel.show_play_button(bool(msg.voice))
+            if msg.voice:
+                self.message_panel.show_play_button(
+                    True, "&Play", "Play the selected voice message"
+                )
+            elif msg.audio:
+                self.message_panel.show_play_button(
+                    True, "&Play", "Play the selected audio file"
+                )
+            elif msg.video or msg.video_note:
+                self.message_panel.show_play_button(
+                    True, "&Play", "Play the selected video"
+                )
+            else:
+                self.message_panel.show_play_button(False)
         else:
             self.message_panel.update_inline_buttons(None)
             self.message_panel.show_play_button(False)
@@ -666,6 +760,34 @@ class MainFrame(wx.Frame):
         self.SetStatusText("Message sent")
         self._msg_frame.SetStatusText("Message sent")
 
+    def send_file(self, file_path, reply_to=None):
+        if not self._current_entity:
+            return
+        entity = self._current_entity
+        name = os.path.basename(file_path)
+        self.SetStatusText(f"Sending {name}...")
+        self._msg_frame.SetStatusText(f"Sending {name}...")
+        threading.Thread(
+            target=self._send_file_thread,
+            args=(entity, file_path, reply_to),
+            daemon=True,
+        ).start()
+
+    def _send_file_thread(self, entity, file_path, reply_to=None):
+        try:
+            msg = self.tg.submit_wait(
+                self.tg.send_file(entity, file_path, reply_to=reply_to)
+            )
+            wx.CallAfter(self._on_send_success, entity, msg)
+        except Exception as e:
+            log.error("Failed to send file: %s", e)
+            wx.CallAfter(
+                self._show_error,
+                f"Failed to send file:\n{e}",
+            )
+            wx.CallAfter(self.SetStatusText, "Ready")
+            wx.CallAfter(self._msg_frame.SetStatusText, "Ready")
+
     # ---------------------------------------------------------- Deletion
 
     def reply_to_selected_message(self):
@@ -714,24 +836,23 @@ class MainFrame(wx.Frame):
             return
         msg = self._current_messages[msg_idx]
         parent = self._msg_frame if self._msg_frame.IsShown() else self
-        if wx.MessageBox(
-            "Delete this message?",
-            "Confirm Delete",
-            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
-            parent,
-        ) != wx.YES:
-            return
+        with DeleteScopeDialog(
+            parent, "Delete Message", "Delete this message?"
+        ) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            revoke = dlg.GetRevoke()
         entity = self._current_entity
         threading.Thread(
             target=self._delete_message_thread,
-            args=(entity, msg, msg_idx, idx),
+            args=(entity, msg, msg_idx, idx, revoke),
             daemon=True,
         ).start()
 
-    def _delete_message_thread(self, entity, msg, msg_idx, list_idx):
+    def _delete_message_thread(self, entity, msg, msg_idx, list_idx, revoke):
         try:
             self.tg.submit_wait(
-                self.tg.delete_messages(entity, [msg.id])
+                self.tg.delete_messages(entity, [msg.id], revoke=revoke)
             )
             wx.CallAfter(self._on_message_deleted, msg_idx, list_idx)
         except Exception as e:
@@ -766,24 +887,24 @@ class MainFrame(wx.Frame):
             )
             return
         name = dialog.name or "Unknown"
-        if wx.MessageBox(
-            f"Delete the entire chat with {name}?\n\n"
-            "This cannot be undone.",
-            "Confirm Delete Chat",
-            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
+        with DeleteScopeDialog(
             self,
-        ) != wx.YES:
-            return
+            "Delete Chat",
+            f"Delete the entire chat with {name}?\n\nThis cannot be undone.",
+        ) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            revoke = dlg.GetRevoke()
         entity = dialog.entity
         threading.Thread(
             target=self._delete_chat_thread,
-            args=(entity,),
+            args=(entity, revoke),
             daemon=True,
         ).start()
 
-    def _delete_chat_thread(self, entity):
+    def _delete_chat_thread(self, entity, revoke):
         try:
-            self.tg.submit_wait(self.tg.delete_dialog(entity))
+            self.tg.submit_wait(self.tg.delete_dialog(entity, revoke=revoke))
             wx.CallAfter(self._on_chat_deleted, entity)
         except Exception as e:
             log.error("Failed to delete chat: %s", e)
@@ -863,16 +984,31 @@ class MainFrame(wx.Frame):
         msg_idx = len(self._current_messages) - 1 - idx
         if msg_idx < 0 or msg_idx >= len(self._current_messages):
             return
-        voice_msg = self._current_messages[msg_idx]
-        if not voice_msg.voice:
-            return
-        self.SetStatusText("Downloading voice message...")
-        self._msg_frame.SetStatusText("Downloading voice message...")
-        threading.Thread(
-            target=self._play_voice_thread,
-            args=(voice_msg,),
-            daemon=True,
-        ).start()
+        media_msg = self._current_messages[msg_idx]
+        if media_msg.voice:
+            self.SetStatusText("Downloading voice message...")
+            self._msg_frame.SetStatusText("Downloading voice message...")
+            threading.Thread(
+                target=self._play_voice_thread,
+                args=(media_msg,),
+                daemon=True,
+            ).start()
+        elif media_msg.audio:
+            self.SetStatusText("Downloading audio...")
+            self._msg_frame.SetStatusText("Downloading audio...")
+            threading.Thread(
+                target=self._play_media_thread,
+                args=(media_msg, "audio"),
+                daemon=True,
+            ).start()
+        elif media_msg.video or media_msg.video_note:
+            self.SetStatusText("Downloading video...")
+            self._msg_frame.SetStatusText("Downloading video...")
+            threading.Thread(
+                target=self._play_media_thread,
+                args=(media_msg, "video"),
+                daemon=True,
+            ).start()
 
     def _play_voice_thread(self, msg):
         try:
@@ -885,10 +1021,53 @@ class MainFrame(wx.Frame):
             wx.CallAfter(self.SetStatusText, "Failed to download voice")
             wx.CallAfter(self._msg_frame.SetStatusText, "Failed to download voice")
 
-    def _play_voice_file(self, path):
+    def _play_voice_file(self, path, label="voice message"):
         self.voice.play_voice(path)
-        self.SetStatusText("Playing voice message...")
-        self._msg_frame.SetStatusText("Playing voice message...")
+        self.SetStatusText(f"Playing {label}...")
+        self._msg_frame.SetStatusText(f"Playing {label}...")
+
+    def _play_media_thread(self, msg, media_type):
+        try:
+            if msg.id in self._media_cache and os.path.exists(
+                self._media_cache[msg.id]
+            ):
+                downloaded = self._media_cache[msg.id]
+            else:
+                dl_dir = self.voice.download_dir + os.sep
+                downloaded = self.tg.submit_wait(
+                    self.tg.download_media(msg, dl_dir)
+                )
+                if downloaded:
+                    self._media_cache[msg.id] = downloaded
+            if not downloaded:
+                wx.CallAfter(self.SetStatusText, "Download failed")
+                wx.CallAfter(
+                    self._msg_frame.SetStatusText, "Download failed"
+                )
+                return
+            if media_type == "video":
+                wx.CallAfter(self._open_video_file, downloaded)
+            else:
+                wx.CallAfter(self._play_voice_file, downloaded, "audio")
+        except Exception as e:
+            log.error("Failed to download %s: %s", media_type, e)
+            wx.CallAfter(
+                self.SetStatusText,
+                f"Failed to download {media_type}",
+            )
+            wx.CallAfter(
+                self._msg_frame.SetStatusText,
+                f"Failed to download {media_type}",
+            )
+
+    def _open_video_file(self, path):
+        self.SetStatusText("Opening video...")
+        self._msg_frame.SetStatusText("Opening video...")
+        try:
+            os.startfile(path)
+        except Exception as e:
+            log.error("Failed to open video: %s", e)
+            self._show_error(f"Failed to open video:\n{e}")
 
     # --------------------------------------------------- Real-time events
 
@@ -1016,71 +1195,282 @@ class MainFrame(wx.Frame):
                 self.config.save()
                 self.sound.set_output_device(dlg.GetOutputDeviceIndex())
 
-    # ---------------------------------------------------- Profile / Mute
+    # ---------------------------------------------------- Account / Mute
 
-    def _on_profile(self, event):
-        self.SetStatusText("Loading profile...")
+    def _on_account(self, event):
+        self.SetStatusText("Loading account data...")
         threading.Thread(
-            target=self._load_profile_thread, daemon=True
+            target=self._load_account_thread, daemon=True
         ).start()
 
-    def _load_profile_thread(self):
+    def _load_account_thread(self):
         try:
             me = self.tg.submit_wait(self.tg.get_me())
             full = self.tg.submit_wait(self.tg.get_full_me())
-            user_info = {
+            account_data = {
                 "first_name": getattr(me, "first_name", "") or "",
                 "last_name": getattr(me, "last_name", "") or "",
                 "username": getattr(me, "username", "") or "",
                 "phone": getattr(me, "phone", "") or "",
                 "bio": getattr(full.full_user, "about", "") or "",
+                "birthday": getattr(full.full_user, "birthday", None),
             }
-            wx.CallAfter(self._show_profile_dialog, user_info)
+
+            from telethon.tl.types import (
+                InputPrivacyKeyChatInvite,
+                InputPrivacyKeyForwards,
+                InputPrivacyKeyPhoneCall,
+                InputPrivacyKeyPhoneNumber,
+                InputPrivacyKeyProfilePhoto,
+                InputPrivacyKeyStatusTimestamp,
+            )
+
+            privacy_keys = {
+                "privacy_last_seen": InputPrivacyKeyStatusTimestamp(),
+                "privacy_phone": InputPrivacyKeyPhoneNumber(),
+                "privacy_photo": InputPrivacyKeyProfilePhoto(),
+                "privacy_forwards": InputPrivacyKeyForwards(),
+                "privacy_calls": InputPrivacyKeyPhoneCall(),
+                "privacy_groups": InputPrivacyKeyChatInvite(),
+            }
+            try:
+                from telethon.tl.types import InputPrivacyKeyBirthday
+                privacy_keys["privacy_birthday"] = InputPrivacyKeyBirthday()
+            except ImportError:
+                pass
+            for key, tl_key in privacy_keys.items():
+                try:
+                    account_data[key] = self.tg.submit_wait(
+                        self.tg.get_privacy_setting(tl_key)
+                    )
+                except Exception:
+                    account_data[key] = 0
+
+            try:
+                account_data["account_ttl_days"] = self.tg.submit_wait(
+                    self.tg.get_account_ttl()
+                )
+            except Exception:
+                account_data["account_ttl_days"] = 180
+
+            try:
+                password = self.tg.submit_wait(self.tg.get_password_info())
+                account_data["has_2fa"] = getattr(
+                    password, "has_password", False
+                )
+            except Exception:
+                account_data["has_2fa"] = False
+
+            try:
+                photos = self.tg.submit_wait(
+                    self.tg.get_profile_photos()
+                )
+                account_data["photo_count"] = len(photos)
+                account_data["photos"] = photos
+            except Exception:
+                account_data["photo_count"] = 0
+                account_data["photos"] = []
+
+            try:
+                from datetime import datetime, timezone
+
+                auths = self.tg.submit_wait(self.tg.get_authorizations())
+                sessions = []
+                for auth in auths.authorizations:
+                    display = auth.app_name or "Unknown app"
+                    if auth.app_version:
+                        display += f" {auth.app_version}"
+                    display += f" on {auth.device_model or 'Unknown device'}"
+                    if auth.country:
+                        display += f", {auth.country}"
+                    date_active = auth.date_active
+                    if isinstance(date_active, int):
+                        date_active = datetime.fromtimestamp(
+                            date_active, tz=timezone.utc
+                        )
+                    if date_active:
+                        local_str = date_active.astimezone().strftime(
+                            "%d %b %Y %H:%M"
+                        )
+                        display += f", active {local_str}"
+                    if auth.current:
+                        display += " (current session)"
+                    sessions.append(
+                        {
+                            "display": display,
+                            "hash": auth.hash,
+                            "current": bool(auth.current),
+                        }
+                    )
+                account_data["sessions"] = sessions
+            except Exception:
+                account_data["sessions"] = []
+
+            wx.CallAfter(self._show_account_dialog, account_data)
         except Exception as e:
-            log.error("Failed to load profile: %s", e)
+            log.error("Failed to load account data: %s", e)
             wx.CallAfter(
-                self._show_error, f"Failed to load profile:\n{e}"
+                self._show_error, f"Failed to load account:\n{e}"
             )
             wx.CallAfter(self.SetStatusText, "Ready")
 
-    def _show_profile_dialog(self, user_info):
-        from .profile_dialog import ProfileDialog
+    def _show_account_dialog(self, account_data):
+        from .account_dialog import AccountDialog
 
         self.SetStatusText("Ready")
-        with ProfileDialog(self, user_info) as dlg:
-            if dlg.ShowModal() == wx.ID_OK:
-                changes = {}
-                new_first = dlg.GetFirstName()
-                new_last = dlg.GetLastName()
-                new_bio = dlg.GetBio()
-                if new_first != user_info["first_name"]:
-                    changes["first_name"] = new_first
-                if new_last != user_info["last_name"]:
-                    changes["last_name"] = new_last
-                if new_bio != user_info["bio"]:
-                    changes["about"] = new_bio
-                if changes:
-                    self.SetStatusText("Updating profile...")
-                    threading.Thread(
-                        target=self._update_profile_thread,
-                        args=(changes,),
-                        daemon=True,
-                    ).start()
+        with AccountDialog(self, account_data) as dlg:
+            result = dlg.ShowModal()
+            terminated = dlg.GetTerminatedSessions()
+            changes = None
+            if result == wx.ID_OK:
+                changes = {
+                    "first_name": dlg.GetFirstName(),
+                    "last_name": dlg.GetLastName(),
+                    "username": dlg.GetUsername(),
+                    "bio": dlg.GetBio(),
+                    "account_ttl_days": dlg.GetAccountTTLDays(),
+                    "birthday": dlg.GetBirthday(),
+                    "photo_to_upload": dlg.GetPhotoToUpload(),
+                    "delete_current_photo": dlg.GetDeleteCurrentPhoto(),
+                }
+                changes.update(dlg.GetPrivacySettings())
 
-    def _update_profile_thread(self, changes):
+        if terminated or changes is not None:
+            self.SetStatusText("Updating account...")
+            self._msg_frame.SetStatusText("Updating account...")
+            threading.Thread(
+                target=self._save_account_thread,
+                args=(account_data, changes, terminated),
+                daemon=True,
+            ).start()
+
+    def _save_account_thread(self, original, changes, terminated_sessions):
         try:
-            self.tg.submit_wait(self.tg.update_profile(**changes))
-            if "first_name" in changes:
+            for auth_hash in terminated_sessions:
+                try:
+                    self.tg.submit_wait(
+                        self.tg.reset_authorization(auth_hash)
+                    )
+                except Exception as e:
+                    log.error("Failed to terminate session: %s", e)
+
+            if changes is None:
+                if terminated_sessions:
+                    wx.CallAfter(
+                        self.SetStatusText, "Sessions terminated"
+                    )
+                    wx.CallAfter(
+                        self._msg_frame.SetStatusText,
+                        "Sessions terminated",
+                    )
+                return
+
+            profile_kwargs = {}
+            if changes["first_name"] != original["first_name"]:
+                profile_kwargs["first_name"] = changes["first_name"]
+            if changes["last_name"] != original["last_name"]:
+                profile_kwargs["last_name"] = changes["last_name"]
+            if changes["bio"] != original["bio"]:
+                profile_kwargs["about"] = changes["bio"]
+            if profile_kwargs:
+                self.tg.submit_wait(
+                    self.tg.update_profile(**profile_kwargs)
+                )
+
+            if changes["username"] != original["username"]:
+                self.tg.submit_wait(
+                    self.tg.update_username(changes["username"])
+                )
+
+            from telethon.tl.types import (
+                InputPrivacyKeyChatInvite,
+                InputPrivacyKeyForwards,
+                InputPrivacyKeyPhoneCall,
+                InputPrivacyKeyPhoneNumber,
+                InputPrivacyKeyProfilePhoto,
+                InputPrivacyKeyStatusTimestamp,
+            )
+
+            privacy_map = {
+                "privacy_last_seen": InputPrivacyKeyStatusTimestamp(),
+                "privacy_phone": InputPrivacyKeyPhoneNumber(),
+                "privacy_photo": InputPrivacyKeyProfilePhoto(),
+                "privacy_forwards": InputPrivacyKeyForwards(),
+                "privacy_calls": InputPrivacyKeyPhoneCall(),
+                "privacy_groups": InputPrivacyKeyChatInvite(),
+            }
+            try:
+                from telethon.tl.types import InputPrivacyKeyBirthday
+                privacy_map["privacy_birthday"] = InputPrivacyKeyBirthday()
+            except ImportError:
+                pass
+            for key, tl_key in privacy_map.items():
+                if changes.get(key) != original.get(key):
+                    self.tg.submit_wait(
+                        self.tg.set_privacy_setting(tl_key, changes[key])
+                    )
+
+            if changes["account_ttl_days"] != original.get(
+                "account_ttl_days"
+            ):
+                self.tg.submit_wait(
+                    self.tg.set_account_ttl(changes["account_ttl_days"])
+                )
+
+            birthday_change = changes.get("birthday")
+            original_bday = original.get("birthday")
+            if birthday_change is None and original_bday is not None:
+                self.tg.submit_wait(self.tg.clear_birthday())
+            elif birthday_change is not None:
+                need_update = True
+                if original_bday:
+                    if (
+                        birthday_change["day"]
+                        == original_bday.day
+                        and birthday_change["month"]
+                        == original_bday.month
+                        and birthday_change.get("year")
+                        == getattr(original_bday, "year", None)
+                    ):
+                        need_update = False
+                if need_update:
+                    self.tg.submit_wait(
+                        self.tg.set_birthday(
+                            birthday_change["day"],
+                            birthday_change["month"],
+                            birthday_change.get("year"),
+                        )
+                    )
+
+            if changes.get("photo_to_upload"):
+                self.tg.submit_wait(
+                    self.tg.upload_profile_photo(
+                        changes["photo_to_upload"]
+                    )
+                )
+            if changes.get("delete_current_photo"):
+                photos = original.get("photos", [])
+                if photos:
+                    self.tg.submit_wait(
+                        self.tg.delete_profile_photo(photos[0])
+                    )
+
+            if "first_name" in profile_kwargs:
                 me = self.tg.submit_wait(self.tg.get_me())
                 name = getattr(me, "first_name", "User") or "User"
                 wx.CallAfter(self.SetTitle, f"Teepee - {name}")
-            wx.CallAfter(self.SetStatusText, "Profile updated")
-        except Exception as e:
-            log.error("Failed to update profile: %s", e)
+
+            wx.CallAfter(self.SetStatusText, "Account updated")
             wx.CallAfter(
-                self._show_error, f"Failed to update profile:\n{e}"
+                self._msg_frame.SetStatusText, "Account updated"
+            )
+        except Exception as e:
+            log.error("Failed to update account: %s", e)
+            wx.CallAfter(
+                self._show_error, f"Failed to update account:\n{e}"
             )
             wx.CallAfter(self.SetStatusText, "Ready")
+            wx.CallAfter(self._msg_frame.SetStatusText, "Ready")
 
     def _on_mute_chat(self, event):
         dialog = self.chat_list.get_selected_dialog()
@@ -1259,6 +1649,175 @@ class MainFrame(wx.Frame):
         self.SetStatusText(f"Joined {target}")
         self._msg_frame.SetStatusText(f"Joined {target}")
         self._load_dialogs()
+
+    def _on_create_group(self, event):
+        from .theme import apply_theme
+
+        dlg = wx.TextEntryDialog(
+            self,
+            "Enter a name for the new group:",
+            "Create Group",
+        )
+        apply_theme(dlg)
+        if dlg.ShowModal() != wx.ID_OK:
+            dlg.Destroy()
+            return
+        title = dlg.GetValue().strip()
+        dlg.Destroy()
+        if not title:
+            return
+        dlg = wx.TextEntryDialog(
+            self,
+            "Enter usernames to invite (comma-separated, or leave empty):",
+            "Create Group - Invite Members",
+        )
+        apply_theme(dlg)
+        if dlg.ShowModal() != wx.ID_OK:
+            dlg.Destroy()
+            return
+        usernames_text = dlg.GetValue().strip()
+        dlg.Destroy()
+        self.SetStatusText(f"Creating group {title}...")
+        threading.Thread(
+            target=self._create_group_thread,
+            args=(title, usernames_text),
+            daemon=True,
+        ).start()
+
+    def _create_group_thread(self, title, usernames_text):
+        try:
+            users = []
+            if usernames_text:
+                for u in usernames_text.split(","):
+                    u = u.strip()
+                    if u:
+                        entity = self.tg.submit_wait(
+                            self.tg.get_entity(u)
+                        )
+                        users.append(entity)
+            if not users:
+                me = self.tg.submit_wait(self.tg.get_me())
+                users.append(me)
+            self.tg.submit_wait(self.tg.create_group(title, users))
+            wx.CallAfter(self._on_group_created, title)
+        except Exception as e:
+            log.error("Failed to create group: %s", e)
+            wx.CallAfter(
+                self._show_error,
+                f"Failed to create group:\n{e}",
+                "Create Group",
+            )
+            wx.CallAfter(self.SetStatusText, "Ready")
+
+    def _on_group_created(self, title):
+        self.SetStatusText(f"Group '{title}' created")
+        self._msg_frame.SetStatusText(f"Group '{title}' created")
+        self._load_dialogs()
+
+    def _on_create_channel(self, event):
+        from .theme import apply_theme
+
+        dlg = wx.TextEntryDialog(
+            self,
+            "Enter a name for the new channel:",
+            "Create Channel",
+        )
+        apply_theme(dlg)
+        if dlg.ShowModal() != wx.ID_OK:
+            dlg.Destroy()
+            return
+        title = dlg.GetValue().strip()
+        dlg.Destroy()
+        if not title:
+            return
+        dlg = wx.TextEntryDialog(
+            self,
+            "Enter a description for the channel (optional):",
+            "Create Channel - Description",
+        )
+        apply_theme(dlg)
+        if dlg.ShowModal() != wx.ID_OK:
+            dlg.Destroy()
+            return
+        about = dlg.GetValue().strip()
+        dlg.Destroy()
+        self.SetStatusText(f"Creating channel {title}...")
+        threading.Thread(
+            target=self._create_channel_thread,
+            args=(title, about),
+            daemon=True,
+        ).start()
+
+    def _create_channel_thread(self, title, about):
+        try:
+            self.tg.submit_wait(
+                self.tg.create_channel(title, about=about)
+            )
+            wx.CallAfter(self._on_channel_created, title)
+        except Exception as e:
+            log.error("Failed to create channel: %s", e)
+            wx.CallAfter(
+                self._show_error,
+                f"Failed to create channel:\n{e}",
+                "Create Channel",
+            )
+            wx.CallAfter(self.SetStatusText, "Ready")
+
+    def _on_channel_created(self, title):
+        self.SetStatusText(f"Channel '{title}' created")
+        self._msg_frame.SetStatusText(f"Channel '{title}' created")
+        self._load_dialogs()
+
+    def _on_invite_user(self, event):
+        from .theme import apply_theme
+
+        if not self._is_group_or_channel():
+            wx.MessageBox(
+                "Select a group or channel first.",
+                "Invite User",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            return
+        dlg = wx.TextEntryDialog(
+            self,
+            "Enter the username of the user to invite:",
+            "Invite User",
+        )
+        apply_theme(dlg)
+        if dlg.ShowModal() != wx.ID_OK:
+            dlg.Destroy()
+            return
+        username = dlg.GetValue().strip()
+        dlg.Destroy()
+        if not username:
+            return
+        entity = self._current_entity
+        self.SetStatusText(f"Inviting {username}...")
+        threading.Thread(
+            target=self._invite_user_thread,
+            args=(entity, username),
+            daemon=True,
+        ).start()
+
+    def _invite_user_thread(self, entity, username):
+        try:
+            user = self.tg.submit_wait(self.tg.get_entity(username))
+            self.tg.submit_wait(
+                self.tg.invite_to_channel(entity, [user])
+            )
+            def _on_invited(u=username):
+                self.SetStatusText(f"Invited {u}")
+                self._msg_frame.SetStatusText(f"Invited {u}")
+            wx.CallAfter(_on_invited)
+        except Exception as e:
+            log.error("Failed to invite user: %s", e)
+            wx.CallAfter(
+                self._show_error,
+                f"Failed to invite user:\n{e}",
+                "Invite User",
+            )
+            wx.CallAfter(self.SetStatusText, "Ready")
 
     def _on_leave_group(self, event):
         if not self._is_group_or_channel():
@@ -1482,7 +2041,7 @@ class MainFrame(wx.Frame):
 
     def _on_about(self, event):
         wx.MessageBox(
-            "Teepee v2516.2\n\nThe simple, speedy Telegram client with the blind in mind.",
+            "Teepee v2516.3\n\nThe simple, speedy Telegram client with the blind in mind.",
             "About Teepee",
             wx.OK | wx.ICON_INFORMATION,
             self,
@@ -1498,24 +2057,36 @@ class MainFrame(wx.Frame):
             "  Enter: Open selected chat (in chat list) or send message (in input field)\n"
             "  Shift+Enter: New line in message\n"
             "  Ctrl+R: Reply to selected message\n"
+            "  Ctrl+Shift+A: Attach and send a file\n"
             "  Escape: Cancel reply or close chat view\n"
             "  Delete: Delete selected message or chat\n\n"
             "Calls:\n"
             "  Ctrl+Shift+C: Start voice call\n"
             "  Ctrl+Shift+H: Hang up\n\n"
-            "Voice:\n"
-            "  Press the Voice button to start recording, press Stop to send\n\n"
+            "Voice and Media:\n"
+            "  Press the Voice button to start recording, press Stop to send\n"
+            "  Press Play on a voice message, audio, or video to play it\n"
+            "  Audio plays inline, video opens in your default player\n\n"
+            "Chat Management (Chat menu):\n"
+            "  Mute/Unmute: Mute or unmute the selected chat's notifications\n\n"
+            "Groups and Channels (Group menu):\n"
+            "  Create Group, Create Channel: Start a new group or channel\n"
+            "  Join/Leave: Join or leave a group or channel\n"
+            "  Invite User: Invite someone to the selected group or channel\n"
+            "  View Members, Kick Member, Edit Title: Manage group settings\n\n"
             "Other:\n"
             "  Ctrl+,: Settings\n"
+            "  F1: Keyboard shortcuts\n"
             "  Alt+F4: Minimize to system tray\n"
             "  Ctrl+Q: Quit\n\n"
             "Tip: Press the Applications key or Shift+F10 on a chat to mute, unmute, or delete it."
         )
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
         wx.MessageBox(
             shortcuts,
             "Keyboard Shortcuts",
             wx.OK | wx.ICON_INFORMATION,
-            self,
+            parent,
         )
 
     def _on_exit(self, event):

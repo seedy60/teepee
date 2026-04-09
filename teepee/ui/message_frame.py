@@ -71,6 +71,9 @@ class MessageFrame(wx.Frame):
             if key == ord("H"):
                 self.main_frame._on_hangup(event)
                 return
+            if key == ord("A"):
+                self.message_panel._on_attach(event)
+                return
 
         if event.ControlDown() and not event.ShiftDown() and not event.AltDown():
             if key == ord("1"):

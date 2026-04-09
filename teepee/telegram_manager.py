@@ -75,6 +75,11 @@ class TelegramManager:
             entity, file_path, voice_note=True, reply_to=reply_to
         )
 
+    async def send_file(self, entity, file_path, reply_to=None):
+        return await self.client.send_file(
+            entity, file_path, reply_to=reply_to
+        )
+
     async def download_media(self, message, path):
         return await self.client.download_media(message, file=str(path))
 
@@ -112,6 +117,29 @@ class TelegramManager:
 
         return await self.client(EditTitleRequest(entity, title))
 
+    async def create_group(self, title, users):
+        from telethon.tl.functions.messages import CreateChatRequest
+
+        return await self.client(CreateChatRequest(title=title, users=users))
+
+    async def create_channel(self, title, about="", megagroup=False):
+        from telethon.tl.functions.channels import CreateChannelRequest
+
+        return await self.client(
+            CreateChannelRequest(
+                title=title,
+                about=about,
+                megagroup=megagroup,
+            )
+        )
+
+    async def invite_to_channel(self, entity, users):
+        from telethon.tl.functions.channels import InviteToChannelRequest
+
+        return await self.client(
+            InviteToChannelRequest(channel=entity, users=users)
+        )
+
     async def get_entity(self, username):
         return await self.client.get_entity(username)
 
@@ -136,6 +164,130 @@ class TelegramManager:
         if about is not None:
             kwargs["about"] = about
         return await self.client(UpdateProfileRequest(**kwargs))
+
+    async def update_username(self, username):
+        from telethon.tl.functions.account import UpdateUsernameRequest
+
+        return await self.client(UpdateUsernameRequest(username))
+
+    async def get_privacy_setting(self, key):
+        from telethon.tl.functions.account import GetPrivacyRequest
+        from telethon.tl.types import (
+            PrivacyValueAllowAll,
+            PrivacyValueAllowContacts,
+            PrivacyValueDisallowAll,
+        )
+
+        result = await self.client(GetPrivacyRequest(key))
+        for rule in result.rules:
+            if isinstance(rule, PrivacyValueAllowAll):
+                return 0
+            if isinstance(rule, PrivacyValueAllowContacts):
+                return 1
+            if isinstance(rule, PrivacyValueDisallowAll):
+                return 2
+        return 0
+
+    async def set_privacy_setting(self, key, value):
+        from telethon.tl.functions.account import SetPrivacyRequest
+        from telethon.tl.types import (
+            InputPrivacyValueAllowAll,
+            InputPrivacyValueAllowContacts,
+            InputPrivacyValueDisallowAll,
+        )
+
+        rules_map = {
+            0: [InputPrivacyValueAllowAll()],
+            1: [InputPrivacyValueAllowContacts()],
+            2: [InputPrivacyValueDisallowAll()],
+        }
+        return await self.client(
+            SetPrivacyRequest(
+                key=key,
+                rules=rules_map.get(value, [InputPrivacyValueAllowAll()]),
+            )
+        )
+
+    async def get_account_ttl(self):
+        from telethon.tl.functions.account import GetAccountTTLRequest
+
+        result = await self.client(GetAccountTTLRequest())
+        return result.days
+
+    async def set_account_ttl(self, days):
+        from telethon.tl.functions.account import SetAccountTTLRequest
+        from telethon.tl.types import AccountDaysTTL
+
+        return await self.client(
+            SetAccountTTLRequest(AccountDaysTTL(days=days))
+        )
+
+    async def get_authorizations(self):
+        from telethon.tl.functions.account import GetAuthorizationsRequest
+
+        return await self.client(GetAuthorizationsRequest())
+
+    async def reset_authorization(self, auth_hash):
+        from telethon.tl.functions.account import ResetAuthorizationRequest
+
+        return await self.client(ResetAuthorizationRequest(auth_hash))
+
+    async def get_password_info(self):
+        from telethon.tl.functions.account import GetPasswordRequest
+
+        return await self.client(GetPasswordRequest())
+
+    async def set_birthday(self, day, month, year=None):
+        from telethon.tl.functions.account import UpdateBirthdayRequest
+        from telethon.tl.types import Birthday
+
+        kwargs = {"day": day, "month": month}
+        if year:
+            kwargs["year"] = year
+        return await self.client(
+            UpdateBirthdayRequest(birthday=Birthday(**kwargs))
+        )
+
+    async def clear_birthday(self):
+        from telethon.tl.functions.account import UpdateBirthdayRequest
+
+        return await self.client(UpdateBirthdayRequest(birthday=None))
+
+    async def upload_profile_photo(self, file_path):
+        from telethon.tl.functions.photos import UploadProfilePhotoRequest
+
+        file = await self.client.upload_file(file_path)
+        return await self.client(UploadProfilePhotoRequest(file=file))
+
+    async def get_profile_photos(self):
+        from telethon.tl.functions.photos import GetUserPhotosRequest
+        from telethon.tl.types import InputUserSelf
+
+        result = await self.client(
+            GetUserPhotosRequest(
+                user_id=InputUserSelf(),
+                offset=0,
+                max_id=0,
+                limit=100,
+            )
+        )
+        return result.photos
+
+    async def delete_profile_photo(self, photo):
+        from telethon.tl.functions.photos import DeletePhotosRequest
+        from telethon.tl.types import InputPhoto
+
+        return await self.client(
+            DeletePhotosRequest(
+                id=[
+                    InputPhoto(
+                        id=photo.id,
+                        access_hash=photo.access_hash,
+                        file_reference=photo.file_reference,
+                    )
+                ]
+            )
+        )
 
     async def mute_chat(self, entity, mute_until):
         from telethon.tl.functions.account import UpdateNotifySettingsRequest

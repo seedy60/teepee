@@ -76,6 +76,10 @@ class MessagePanel(wx.Panel):
         self.send_btn.SetToolTip("Send the message")
         btn_sizer.Add(self.send_btn, 0, wx.ALL, 2)
 
+        self.attach_btn = wx.Button(self, label="&Attach")
+        self.attach_btn.SetToolTip("Send a file")
+        btn_sizer.Add(self.attach_btn, 0, wx.ALL, 2)
+
         self.voice_btn = wx.Button(self, label="&Voice")
         self.voice_btn.SetToolTip("Record a voice message")
         btn_sizer.Add(self.voice_btn, 0, wx.ALL, 2)
@@ -101,6 +105,7 @@ class MessagePanel(wx.Panel):
         self.SetSizer(sizer)
 
         self.send_btn.Bind(wx.EVT_BUTTON, self._on_send)
+        self.attach_btn.Bind(wx.EVT_BUTTON, self._on_attach)
         self.voice_btn.Bind(wx.EVT_BUTTON, self._on_voice)
         self.play_btn.Bind(wx.EVT_BUTTON, self._on_play)
         self.delete_msg_btn.Bind(wx.EVT_BUTTON, self._on_delete_message)
@@ -147,7 +152,7 @@ class MessagePanel(wx.Panel):
             else:
                 sender = "Unknown"
 
-        time_str = msg.date.strftime("%H:%M") if msg.date else ""
+        time_str = msg.date.astimezone().strftime("%H:%M") if msg.date else ""
 
         reply_prefix = ""
         if msg.reply_to:
@@ -167,9 +172,26 @@ class MessagePanel(wx.Panel):
     @staticmethod
     def _media_label(media):
         type_name = type(media).__name__
+        if type_name == "MessageMediaDocument":
+            doc = getattr(media, "document", None)
+            if doc:
+                for attr in getattr(doc, "attributes", []):
+                    attr_name = type(attr).__name__
+                    if attr_name == "DocumentAttributeAudio":
+                        if getattr(attr, "voice", False):
+                            return "Voice message"
+                        return "Audio"
+                    if attr_name == "DocumentAttributeVideo":
+                        if getattr(attr, "round_message", False):
+                            return "Video message"
+                        return "Video"
+                    if attr_name == "DocumentAttributeSticker":
+                        return "Sticker"
+                    if attr_name == "DocumentAttributeAnimated":
+                        return "GIF"
+            return "Document"
         labels = {
             "MessageMediaPhoto": "Photo",
-            "MessageMediaDocument": "Document",
             "MessageMediaContact": "Contact",
             "MessageMediaGeo": "Location",
             "MessageMediaGeoLive": "Live location",
@@ -187,7 +209,7 @@ class MessagePanel(wx.Panel):
     def append_new_message(self, data):
         self._show_chat()
         sender = data["sender_name"]
-        time_str = data["date"].strftime("%H:%M") if data["date"] else ""
+        time_str = data["date"].astimezone().strftime("%H:%M") if data["date"] else ""
 
         reply_prefix = ""
         if data.get("reply_to_msg_id"):
@@ -231,6 +253,21 @@ class MessagePanel(wx.Panel):
 
     def _on_send(self, event):
         self.do_send()
+
+    def _on_attach(self, event):
+        with wx.FileDialog(
+            self.GetTopLevelParent(),
+            "Choose a file to send",
+            wildcard="All files (*.*)|*.*",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                path = dlg.GetPath()
+                reply_to = None
+                if self._reply_to_msg:
+                    reply_to = self._reply_to_msg.id
+                self.clear_reply()
+                self.frame.send_file(path, reply_to=reply_to)
 
     def _on_voice(self, event):
         if not self._recording:
@@ -286,17 +323,23 @@ class MessagePanel(wx.Panel):
         if 0 <= index < self.messages_list.GetCount():
             self.messages_list.Delete(index)
 
-    def show_play_button(self, show):
-        if show and not self.play_btn.IsShown():
-            self.play_btn.Show()
-            self.input_sizer.Layout()
+    def show_play_button(self, show, label="&Play", tooltip="Play the selected voice message"):
+        if show:
+            self.play_btn.SetLabel(label)
+            self.play_btn.SetToolTip(tooltip)
+            if not self.play_btn.IsShown():
+                self.play_btn.Show()
+                self.input_sizer.Layout()
         elif not show and self.play_btn.IsShown():
+            if wx.Window.FindFocus() is self.play_btn:
+                self.messages_list.SetFocus()
             self.play_btn.Hide()
             self.input_sizer.Layout()
 
     def set_enabled(self, enabled):
         self.input_ctrl.Enable(enabled)
         self.send_btn.Enable(enabled)
+        self.attach_btn.Enable(enabled)
         self.voice_btn.Enable(enabled)
         self.delete_msg_btn.Enable(enabled)
         self.reply_btn.Enable(enabled)

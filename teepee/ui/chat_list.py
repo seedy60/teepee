@@ -79,9 +79,26 @@ class ChatListPanel(wx.Panel):
     @staticmethod
     def _media_label(media):
         type_name = type(media).__name__
+        if type_name == "MessageMediaDocument":
+            doc = getattr(media, "document", None)
+            if doc:
+                for attr in getattr(doc, "attributes", []):
+                    attr_name = type(attr).__name__
+                    if attr_name == "DocumentAttributeAudio":
+                        if getattr(attr, "voice", False):
+                            return "Voice message"
+                        return "Audio"
+                    if attr_name == "DocumentAttributeVideo":
+                        if getattr(attr, "round_message", False):
+                            return "Video message"
+                        return "Video"
+                    if attr_name == "DocumentAttributeSticker":
+                        return "Sticker"
+                    if attr_name == "DocumentAttributeAnimated":
+                        return "GIF"
+            return "Document"
         labels = {
             "MessageMediaPhoto": "Photo",
-            "MessageMediaDocument": "Document",
             "MessageMediaContact": "Contact",
             "MessageMediaGeo": "Location",
             "MessageMediaGeoLive": "Live location",

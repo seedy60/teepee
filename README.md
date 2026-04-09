@@ -4,27 +4,76 @@ The simple, speedy Telegram client with the blind in mind.
 
 ## Introduction
 
-Teepee is a lightweight desktop Telegram client built with wxPython and designed with blind and visually impaired users in mind. If you want a Telegram experience that works smoothly with screen readers, supports keyboard navigation throughout, and doesn't try to get in the way of everything, Teepee is for you.
+Teepee is a lightweight desktop Telegram client designed with blind and visually impaired users in mind. If you want a Telegram experience that works smoothly with screen readers, supports keyboard navigation throughout, and doesn't try to get in the way of everything, Teepee is for you.
 
 ## Features
 
-- Send and receive text messages, voice messages, and media.
+### Messaging
+
+- Send and receive text messages, voice messages, files, and media.
 - Messages open in a separate window when you select a chat, keeping the chat list always visible.
 - Browse your chat list with a live search filter.
 - Reply to, delete, and manage messages with keyboard shortcuts.
+- When deleting a message or chat, choose whether to delete for yourself only or for everyone.
 - Record and send voice messages directly from the app.
-- Play received voice messages inline.
-- View and edit your Telegram profile, including first name, last name, and bio, from the File menu.
-- Mute chat notifications temporarily (1 hour, 8 hours, 1 day, 1 week) or permanently. Muted chats are labelled in the chat list and produce no notification sounds.
-- Join, leave, and manage groups and channels, including viewing members, kicking users, and editing group titles.
+- Send files using the Attach button or Ctrl+Shift+A.
+- Play received voice messages and audio files inline.
+- Play received video files in your default media player.
+- Media types (audio, video, sticker, GIF, document) are clearly labelled in the message list and chat previews.
 - Interact with bot inline buttons for bots that support it.
-- Start voice calls with contacts.
-- Notification sounds for sent messages, received messages, group messages, and channel messages, with a setting to toggle them on or off.
-- Configure audio input and output devices from the settings dialog.
-- All on-screen elements, such as buttons, text fields, and lists, are clearly labelled for screen reader users.
-- Keyboard friendly navigation with tab, arrow keys, and area shortcuts (Ctrl+1 for chat list, Ctrl+2 for messages, Ctrl+3 for message input).
-- A Keyboard Shortcuts reference available from the Help menu or by pressing F1.
-- Detects if your system is in dark mode and applies a dark theme to suit, including dark title bars on Windows.
+- Unread message counts are shown in the chat list and cleared automatically when you open a chat.
+- Message timestamps are displayed in your local timezone.
+
+### Calls
+
+- Start voice calls with contacts using Ctrl+Shift+C.
+- Hang up with Ctrl+Shift+H.
+
+### Account management
+
+- View and edit your full Telegram account from File then My Account, including:
+  - Profile: first name, last name, username, phone (read-only), bio, birthday (with optional year), and profile photos (upload or delete).
+  - Privacy: control who can see your last seen, phone number, profile photo, forwarded messages, calls, group invites, and birthday (everyone, contacts only, or nobody).
+  - Security: view two-factor authentication status, list all active sessions, and terminate any session remotely.
+  - Account: set the self-destruct timer (1, 3, 6, or 12 months of inactivity before automatic deletion).
+
+### Chat muting
+
+- Mute chat notifications temporarily (1 hour, 8 hours, 1 day, 1 week) or permanently.
+- Muted chats are labelled [Muted] in the chat list and produce no notification sounds.
+- Mute and unmute from the Chat menu or the right-click context menu on the chat list.
+- The context menu disables the Unmute option when the chat is not muted.
+
+### Group management
+
+- Create a new group and optionally invite members at creation time.
+- Create a new channel with an optional description.
+- Invite a user to the currently selected group or channel by username.
+- Join a group or channel by username or invite link.
+- Leave the currently selected group or channel.
+- View the member list.
+- Kick a member by username.
+- Edit the group title.
+
+### Sound packs
+
+Teepee plays notification sounds for sent messages, received messages, group messages, and channel messages. The sounds are organised into packs.
+
+- The default pack ships in the sounds/default folder with four WAV files: sent.wav, received.wav, group_received.wav, and channel_received.wav.
+- To create a custom sound pack, add a new folder inside sounds/ with the same four filenames. For example, sounds/retro/ with your own WAV files.
+- Select your preferred pack from the Settings dialog (Ctrl+,) under Notifications then Sound Pack.
+- Toggle all notification sounds on or off with the "Enable notification sounds" checkbox in the same section.
+
+### Accessibility
+
+- All on-screen elements - buttons, text fields, lists, and dialogs - are clearly labelled for screen reader users.
+- Keyboard-friendly navigation with Tab, arrow keys, and area shortcuts (Ctrl+1 for chat list, Ctrl+2 for messages, Ctrl+3 for message input).
+- Focus is managed throughout the app: after closing dialogs, deleting messages, switching chats, and restoring from the system tray, focus returns to a logical target.
+- Status messages are mirrored to both the main window and message window, so screen reader users always get feedback regardless of which window has focus.
+- A Keyboard Shortcuts reference is available from the Help menu or by pressing F1.
+- Dark mode detected automatically with a matching dark theme applied, including dark title bars on Windows.
+- High contrast mode is detected and respected.
+- System tray integration: closing the window minimises to tray; a balloon notification confirms.
 - Right-click context menu on the chat list for quick access to mute, unmute, and delete actions.
 
 ## Installation
@@ -112,11 +161,18 @@ uv run python setup_credentials.py
 2. Type your message in the message input field at the bottom of the message window.
 3. Press Enter to send, or Shift+Enter to add a new line.
 
-### Voice messages
+### Voice messages and media
 
 1. Press the Voice button to start recording.
 2. Press the Stop button (the same button) to stop recording and send the voice message.
-3. To play a received voice message, select it in the message list and press the Play button.
+3. To play a received voice message or audio file, select it in the message list and press the Play button. Audio plays inline.
+4. To play a received video, select it and press the Play button. The video opens in your default media player.
+
+### Sending files
+
+1. Open a chat.
+2. Press the Attach button, or use Ctrl+Shift+A.
+3. Choose a file from the file picker. The file is sent to the current chat.
 
 ### Keyboard shortcuts
 
@@ -132,8 +188,9 @@ The following table lists all keyboard shortcuts grouped by category.
 | Enter | Send message (when in the input field) |
 | Shift+Enter | New line in message |
 | Ctrl+R | Reply to selected message |
+| Ctrl+Shift+A | Attach and send a file |
 | Escape | Cancel reply |
-| Delete | Delete selected message or chat |
+| Delete | Delete selected message or chat (choose delete for me or for everyone) |
 | Ctrl+Shift+C | Start voice call |
 | Ctrl+Shift+H | Hang up |
 | Ctrl+, | Audio settings |
@@ -144,6 +201,9 @@ The following table lists all keyboard shortcuts grouped by category.
 
 From the Group menu you can:
 
+- Create a new group. You will be prompted for a name and optionally a comma-separated list of usernames to invite.
+- Create a new channel. You will be prompted for a name and an optional description.
+- Invite a user to the currently selected group or channel by entering their username.
 - Join a group or channel by username or invite link.
 - Leave the currently selected group or channel.
 - View the member list.
@@ -152,11 +212,20 @@ From the Group menu you can:
 
 ### Settings
 
-Press Ctrl+, or open the Settings menu to configure audio input and output devices and toggle notification sounds.
+Press Ctrl+, or open the Settings menu to configure:
 
-### Profile
+- Audio input and output devices.
+- Notification sounds on or off.
+- Sound pack selection (see the Sound packs section above for how to create custom packs).
 
-Open File then My Profile to view your Telegram profile. You can edit your first name, last name, and bio. Username and phone number are displayed as read-only fields.
+### Account
+
+Open File then My Account to view and edit your Telegram account. The dialog has four tabs:
+
+- **Profile** - edit your first name, last name, username, and bio. Phone number is displayed as a read-only field. Set or clear your birthday with an optional year. Upload a new profile photo or delete your current one.
+- **Privacy** - choose who can see your last seen, phone number, profile photo, forwarded messages, calls, group invites, and birthday.
+- **Security** - view your two-factor authentication status, see all active sessions, and terminate any session remotely.
+- **Account** - set the self-destruct timer for your account.
 
 ### Chat muting
 

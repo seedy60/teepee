@@ -131,6 +131,10 @@ class VoiceManager:
     def get_download_path(self, message_id):
         return str(self._temp_dir / f"voice_{message_id}.ogg")
 
+    @property
+    def download_dir(self):
+        return str(self._temp_dir)
+
     def cleanup(self):
         import shutil
 

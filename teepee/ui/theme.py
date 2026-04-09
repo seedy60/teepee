@@ -76,7 +76,7 @@ def apply_theme(window):
 
 
 def _apply_colors(window):
-    if isinstance(window, (wx.TextCtrl, wx.ListBox, wx.Choice)):
+    if isinstance(window, (wx.TextCtrl, wx.ListBox, wx.Choice, wx.SpinCtrl)):
         window.SetBackgroundColour(_DARK_BG_ALT)
         window.SetForegroundColour(_DARK_FG)
     elif isinstance(window, wx.StatusBar):
@@ -95,6 +95,9 @@ def _apply_colors(window):
         window.SetForegroundColour(_DARK_FG)
         window.SetBackgroundColour(_DARK_BG)
     elif isinstance(window, wx.CheckBox):
+        window.SetForegroundColour(_DARK_FG)
+        window.SetBackgroundColour(_DARK_BG)
+    elif isinstance(window, wx.RadioButton):
         window.SetForegroundColour(_DARK_FG)
         window.SetBackgroundColour(_DARK_BG)
     elif isinstance(window, wx.SplitterWindow):
