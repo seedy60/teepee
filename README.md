@@ -190,6 +190,7 @@ The following table lists all keyboard shortcuts grouped by category.
 | Enter | Send message (when in the input field) |
 | Shift+Enter | New line in message |
 | Ctrl+R | Reply to selected message |
+| Ctrl+C | Copy selected message to clipboard (in message list) |
 | Ctrl+Shift+A | Attach and send a file |
 | Ctrl+Shift+S | Save the selected voice message or file attachment |
 | Escape | Cancel reply |

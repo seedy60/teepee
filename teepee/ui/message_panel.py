@@ -151,19 +151,20 @@ class MessagePanel(wx.Panel):
             self.messages_list.EnsureVisible(last)
         self.messages_list.Thaw()
 
+    @staticmethod
+    def _display_name(obj):
+        if not obj:
+            return "Unknown"
+        first = getattr(obj, "first_name", None) or ""
+        last = getattr(obj, "last_name", None) or ""
+        full = f"{first} {last}".strip()
+        return full or getattr(obj, "title", None) or "Unknown"
+
     def _format_message_obj(self, msg):
         if msg.out:
             sender = "You"
         else:
-            sender_obj = msg.sender
-            if sender_obj:
-                sender = (
-                    getattr(sender_obj, "first_name", None)
-                    or getattr(sender_obj, "title", None)
-                    or "Unknown"
-                )
-            else:
-                sender = "Unknown"
+            sender = self._display_name(msg.sender)
 
         time_str = msg.date.astimezone().strftime("%H:%M") if msg.date else ""
 

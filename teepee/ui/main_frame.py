@@ -275,6 +275,13 @@ class MainFrame(wx.Frame):
             "View keyboard shortcuts",
         )
         help_menu.AppendSeparator()
+        self._update_id = wx.NewIdRef()
+        help_menu.Append(
+            self._update_id,
+            "Check for &Updates...",
+            "Check for a newer version of Teepee",
+        )
+        help_menu.AppendSeparator()
         help_menu.Append(wx.ID_ABOUT, "&About Teepee")
         menubar.Append(help_menu, "&Help")
 
@@ -289,6 +296,7 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self._on_settings, id=self._settings_id)
         self.Bind(wx.EVT_MENU, self._on_shortcuts, id=self._shortcuts_id)
         self.Bind(wx.EVT_MENU, self._on_about, id=wx.ID_ABOUT)
+        self.Bind(wx.EVT_MENU, self._on_check_updates, id=self._update_id)
         self.Bind(wx.EVT_MENU, self._on_join_group, id=self._join_id)
         self.Bind(wx.EVT_MENU, self._on_leave_group, id=self._leave_id)
         self.Bind(wx.EVT_MENU, self._on_create_group, id=self._create_group_id)
@@ -396,6 +404,9 @@ class MainFrame(wx.Frame):
         except Exception:
             pass
         self._load_dialogs()
+
+        from ..updater import check_for_update_background
+        check_for_update_background(self)
 
     def _on_connection_error(self, error):
         wx.MessageBox(
@@ -539,12 +550,7 @@ class MainFrame(wx.Frame):
         self.message_panel.messages_list.Freeze()
         self.message_panel.messages_list.Clear()
         self.message_panel.messages_list.Thaw()
-        name = (
-            getattr(entity, "first_name", None)
-            or getattr(entity, "title", None)
-            or getattr(entity, "username", None)
-            or "Unknown"
-        )
+        name = self._entity_display_name(entity)
         self._msg_frame.SetTitle(f"{name} - Teepee")
         self._msg_frame.SetStatusText(f"Loading messages from {name}...")
         self._msg_frame.Show()
@@ -634,12 +640,7 @@ class MainFrame(wx.Frame):
             self.message_panel.update_inline_buttons(None)
             self.message_panel.show_play_button(False)
             self.message_panel.show_save_button(False)
-        name = (
-            getattr(entity, "first_name", None)
-            or getattr(entity, "title", None)
-            or getattr(entity, "username", None)
-            or "Chat"
-        )
+        name = self._entity_display_name(entity)
         if messages:
             status = f"{name} - {len(messages)} messages"
         else:
@@ -1211,20 +1212,23 @@ class MainFrame(wx.Frame):
                 self.message_panel.append_new_message(data)
                 if msg:
                     self.message_panel.update_inline_buttons(msg)
-                # Mark as read since the chat is currently open
+                # Mark as read since the chat is currently open,
+                # then reload dialogs so the unread count clears.
                 entity = self._current_entity
                 threading.Thread(
-                    target=self._mark_read_thread,
+                    target=self._mark_read_and_reload_thread,
                     args=(entity,),
                     daemon=True,
                 ).start()
+                return
         self._load_dialogs()
 
-    def _mark_read_thread(self, entity):
+    def _mark_read_and_reload_thread(self, entity):
         try:
             self.tg.submit_wait(self.tg.mark_as_read(entity))
         except Exception:
             pass
+        wx.CallAfter(self._load_dialogs)
 
     def _on_message_sent(self, data):
         # Sent messages are already shown by _on_send_success;
@@ -2146,13 +2150,25 @@ class MainFrame(wx.Frame):
 
     # ------------------------------------------------------------ Other
 
+    @staticmethod
+    def _entity_display_name(entity):
+        first = getattr(entity, "first_name", "") or ""
+        last = getattr(entity, "last_name", "") or ""
+        full = f"{first} {last}".strip()
+        return full or getattr(entity, "title", None) or getattr(entity, "username", None) or "Unknown"
+
     def _show_error(self, message, title="Error"):
         parent = self._msg_frame if self._msg_frame.IsShown() else self
         wx.MessageBox(message, title, wx.OK | wx.ICON_ERROR, parent)
 
+    def _on_check_updates(self, event):
+        from ..updater import check_for_update_manual
+        check_for_update_manual(self)
+
     def _on_about(self, event):
+        from .. import APP_VERSION
         wx.MessageBox(
-            "Teepee v2516.3\n\nThe simple, speedy Telegram client with the blind in mind.",
+            f"Teepee v{APP_VERSION}\n\nThe simple, speedy Telegram client with the blind in mind.",
             "About Teepee",
             wx.OK | wx.ICON_INFORMATION,
             self,
@@ -2168,6 +2184,7 @@ class MainFrame(wx.Frame):
             "  Enter: Open selected chat (in chat list) or send message (in input field)\n"
             "  Shift+Enter: New line in message\n"
             "  Ctrl+R: Reply to selected message\n"
+            "  Ctrl+C: Copy selected message to clipboard (in message list)\n"
             "  Ctrl+Shift+A: Attach and send a file\n"
             "  Escape: Cancel reply or close chat view\n"
             "  Delete: Delete selected message or chat\n\n"
@@ -2190,6 +2207,7 @@ class MainFrame(wx.Frame):
             "Other:\n"
             "  Ctrl+,: Settings\n"
             "  F1: Keyboard shortcuts\n"
+            "  Help > Check for Updates: Check for a newer version\n"
             "  Alt+F4: Minimize to system tray\n"
             "  Ctrl+Q: Quit\n\n"
             "Tip: Press the Applications key or Shift+F10 on a chat to mute, unmute, or delete it."

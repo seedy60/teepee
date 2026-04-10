@@ -30,6 +30,17 @@ class MessageFrame(wx.Frame):
         self.main_frame.Raise()
         self.main_frame.chat_list.list_ctrl.SetFocus()
 
+    def _copy_selected_message(self):
+        idx = self.message_panel.messages_list.GetSelection()
+        if idx == wx.NOT_FOUND:
+            return
+        text = self.message_panel.messages_list.GetString(idx)
+        if wx.TheClipboard.Open():
+            wx.TheClipboard.SetData(wx.TextDataObject(text))
+            wx.TheClipboard.Close()
+            self.main_frame.SetStatusText("Message copied")
+            self.SetStatusText("Message copied")
+
     def _on_char_hook(self, event):
         key = event.GetKeyCode()
         focused = wx.Window.FindFocus()
@@ -79,6 +90,10 @@ class MessageFrame(wx.Frame):
                 return
 
         if event.ControlDown() and not event.ShiftDown() and not event.AltDown():
+            if key == ord("C"):
+                if focused == self.message_panel.messages_list:
+                    self._copy_selected_message()
+                    return
             if key == ord("1"):
                 self.main_frame.Raise()
                 self.main_frame.chat_list.list_ctrl.SetFocus()

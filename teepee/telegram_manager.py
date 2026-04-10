@@ -328,8 +328,11 @@ class TelegramManager:
             msg = event.message
             sender = await event.get_sender()
             chat = await event.get_chat()
+            first = getattr(sender, "first_name", None) or ""
+            last = getattr(sender, "last_name", None) or ""
+            full = f"{first} {last}".strip()
             sender_name = (
-                getattr(sender, "first_name", None)
+                full
                 or getattr(sender, "title", None)
                 or "Unknown"
             )
