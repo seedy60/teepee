@@ -12,6 +12,7 @@ from .sound_manager import SoundManager
 from .telegram_manager import TelegramManager
 from .ui.main_frame import MainFrame
 from .ui.theme import apply_theme
+from .updater import cleanup_old_files
 from .voice_manager import VoiceManager
 
 logging.basicConfig(
@@ -25,6 +26,7 @@ logging.getLogger("teepee.call_manager").setLevel(logging.DEBUG)
 class TeepeeApp(wx.App):
     def OnInit(self):
         self.SetAppName(APP_NAME)
+        cleanup_old_files()
 
         self.config = Config()
         self.telegram_manager = TelegramManager(self.config)

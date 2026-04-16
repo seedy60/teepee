@@ -22,6 +22,15 @@ LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/lates
 DOWNLOAD_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/teepee.zip"
 
 
+def cleanup_old_files():
+    """Remove the staging directory left over from a previous update."""
+    if not getattr(sys, "frozen", False):
+        return
+    staging = Path(sys.executable).parent / "_update_staging"
+    if staging.is_dir():
+        shutil.rmtree(staging, ignore_errors=True)
+
+
 def _parse_version(tag: str) -> tuple[int, ...]:
     tag = tag.lstrip("vV")
     parts = []
@@ -55,8 +64,19 @@ def check_for_update() -> str | None:
     return None
 
 
-def _download_and_apply(parent: wx.Window) -> bool:
+def _download_and_extract(parent: wx.Window) -> Path | None:
+    """Download the update zip and extract it to a staging directory.
+
+    Returns the staging directory on success, or *None* on failure.
+    The staging directory contains the unpacked files ready to be
+    copied over the application directory once the app has exited.
+    """
     app_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path.cwd()
+    staging = app_dir / "_update_staging"
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True, exist_ok=True)
+
     tmp_zip = Path(tempfile.mkdtemp()) / "teepee_update.zip"
 
     try:
@@ -73,7 +93,7 @@ def _download_and_apply(parent: wx.Window) -> bool:
             wx.OK | wx.ICON_ERROR,
             parent,
         )
-        return False
+        return None
 
     try:
         with zipfile.ZipFile(tmp_zip, "r") as zf:
@@ -82,7 +102,7 @@ def _download_and_apply(parent: wx.Window) -> bool:
                 if len(parts) <= 1:
                     continue
                 rel = Path(*parts[1:])
-                target = app_dir / rel
+                target = staging / rel
                 if member.is_dir():
                     target.mkdir(parents=True, exist_ok=True)
                 else:
@@ -98,7 +118,7 @@ def _download_and_apply(parent: wx.Window) -> bool:
             wx.OK | wx.ICON_ERROR,
             parent,
         )
-        return False
+        return None
     finally:
         try:
             tmp_zip.unlink(missing_ok=True)
@@ -106,15 +126,40 @@ def _download_and_apply(parent: wx.Window) -> bool:
         except OSError:
             pass
 
-    return True
+    return staging
 
 
-def _restart_app():
-    if getattr(sys, "frozen", False):
-        exe = sys.executable
-        subprocess.Popen([exe])
-    else:
-        subprocess.Popen([sys.executable] + sys.argv)
+def _apply_via_batch(staging: Path):
+    """Write a batch script that waits for the app to exit, copies new
+    files over the install directory, then relaunches the app."""
+    app_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path.cwd()
+    exe = sys.executable if getattr(sys, "frozen", False) else None
+    pid = os.getpid()
+    bat = staging / "_apply_update.bat"
+    lines = [
+        "@echo off",
+        f'echo Waiting for Teepee (PID {pid}) to exit...',
+        ":wait",
+        f'tasklist /FI "PID eq {pid}" 2>NUL | find /I "{pid}" >NUL',
+        "if not errorlevel 1 (",
+        "    timeout /t 1 /nobreak >NUL",
+        "    goto wait",
+        ")",
+        f'echo Copying files to "{app_dir}"...',
+        f'xcopy /s /y /q "{staging}\\*" "{app_dir}\\"',
+    ]
+    if exe:
+        lines.append(f'echo Starting Teepee...')
+        lines.append(f'start "" "{exe}"')
+    lines += [
+        f'rmdir /s /q "{staging}"',
+        "del /f /q \"%~f0\"",
+    ]
+    bat.write_text("\r\n".join(lines), encoding="utf-8")
+    subprocess.Popen(
+        ["cmd.exe", "/c", str(bat)],
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
     wx.GetApp().GetTopWindow().quit()
 
 
@@ -143,22 +188,22 @@ def prompt_and_update(parent: wx.Window, latest_tag: str):
     progress.Pulse()
 
     def _do_update():
-        success = _download_and_apply(parent)
-        wx.CallAfter(_finish_update, success, progress, parent)
+        staging = _download_and_extract(parent)
+        wx.CallAfter(_finish_update, staging, progress, parent)
 
     threading.Thread(target=_do_update, daemon=True).start()
 
 
-def _finish_update(success: bool, progress: wx.ProgressDialog, parent: wx.Window):
+def _finish_update(staging: Path | None, progress: wx.ProgressDialog, parent: wx.Window):
     progress.Destroy()
-    if success:
+    if staging:
         wx.MessageBox(
-            "Update installed successfully. Teepee will now restart.",
-            "Update Complete",
+            "Update downloaded. Teepee will now close, install the update, and restart.",
+            "Update Ready",
             wx.OK | wx.ICON_INFORMATION,
             parent,
         )
-        _restart_app()
+        _apply_via_batch(staging)
 
 
 def check_for_update_background(parent: wx.Window):
