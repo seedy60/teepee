@@ -130,6 +130,29 @@ class SettingsDialog(wx.Dialog):
             border=10,
         )
 
+        # --- Display ---
+        display_box = wx.StaticBoxSizer(wx.VERTICAL, self, "Display")
+
+        display_box.Add(
+            wx.StaticText(self, label="Time Format:"),
+            flag=wx.LEFT | wx.TOP,
+            border=5,
+        )
+        time_choices = ["12 hour (1:30 PM)", "24 hour (13:30)"]
+        self.time_format_choice = wx.Choice(self, choices=time_choices)
+        self.time_format_choice.SetName("Time Format")
+        current_tf = config.get("time_format", "24h")
+        self.time_format_choice.SetSelection(0 if current_tf == "12h" else 1)
+        display_box.Add(
+            self.time_format_choice, flag=wx.EXPAND | wx.ALL, border=5
+        )
+
+        sizer.Add(
+            display_box,
+            flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            border=10,
+        )
+
         # --- Buttons ---
         btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
         sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
@@ -160,6 +183,9 @@ class SettingsDialog(wx.Dialog):
         if idx != wx.NOT_FOUND:
             return self.sound_pack_choice.GetString(idx)
         return "default"
+
+    def GetTimeFormat(self):
+        return "12h" if self.time_format_choice.GetSelection() == 0 else "24h"
 
     def _on_test_speaker(self, event):
         idx = self.output_choice.GetSelection()

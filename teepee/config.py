@@ -11,6 +11,7 @@ DEFAULT_CONFIG = {
     "camera_device_index": -1,
     "sounds_enabled": True,
     "sound_pack": "default",
+    "time_format": "24h",
 }
 
 

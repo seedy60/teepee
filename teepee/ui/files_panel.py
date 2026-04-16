@@ -260,7 +260,9 @@ class FilesPanel(wx.Panel):
         size = self._file_size_str(msg)
         date_str = ""
         if msg.date:
-            date_str = msg.date.astimezone().strftime("%Y-%m-%d %H:%M")
+            tf = self.frame.config.get("time_format", "24h")
+            time_fmt = "%I:%M %p" if tf == "12h" else "%H:%M"
+            date_str = msg.date.astimezone().strftime(f"%Y-%m-%d {time_fmt}")
         sender = ""
         if msg.sender:
             first = getattr(msg.sender, "first_name", None) or ""

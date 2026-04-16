@@ -183,13 +183,17 @@ class MessagePanel(wx.Panel):
         full = f"{first} {last}".strip()
         return full or getattr(obj, "title", None) or "Unknown"
 
+    def _get_time_format(self):
+        tf = self.frame.config.get("time_format", "24h")
+        return "%I:%M %p" if tf == "12h" else "%H:%M"
+
     def _format_message_obj(self, msg):
         if msg.out:
             sender = "You"
         else:
             sender = self._display_name(msg.sender)
 
-        time_str = msg.date.astimezone().strftime("%H:%M") if msg.date else ""
+        time_str = msg.date.astimezone().strftime(self._get_time_format()) if msg.date else ""
 
         reply_prefix = ""
         if msg.reply_to:
@@ -270,7 +274,7 @@ class MessagePanel(wx.Panel):
     def append_new_message(self, data):
         self._show_chat()
         sender = data["sender_name"]
-        time_str = data["date"].astimezone().strftime("%H:%M") if data["date"] else ""
+        time_str = data["date"].astimezone().strftime(self._get_time_format()) if data["date"] else ""
 
         reply_prefix = ""
         if data.get("reply_to_msg_id"):

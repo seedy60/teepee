@@ -634,6 +634,7 @@ class MainFrame(wx.Frame):
         except Exception as e:
             log.error("Failed to load dialogs: %s", e)
             wx.CallAfter(self.SetStatusText, f"Failed to load chats: {e}")
+            wx.CallAfter(announce, f"Failed to load chats: {e}")
 
     def _on_dialogs_loaded(self, dialogs):
         self._dialogs = list(dialogs)
@@ -746,6 +747,7 @@ class MainFrame(wx.Frame):
             self._pending_chat_focus = False
             wx.CallAfter(self.SetStatusText, f"Failed to load messages: {e}")
             wx.CallAfter(self._msg_frame.SetStatusText, f"Failed to load messages: {e}")
+            wx.CallAfter(announce, f"Failed to load messages: {e}")
 
     def _on_messages_loaded(self, messages, entity):
         if entity != self._current_entity:
@@ -904,6 +906,7 @@ class MainFrame(wx.Frame):
         if entity != self._current_entity:
             return
         self._shown_msg_ids.add(msg.id)
+        self._current_messages.insert(0, msg)
         data = {
             "message": msg,
             "sender_name": "You",
@@ -918,6 +921,7 @@ class MainFrame(wx.Frame):
             ),
         }
         self.message_panel.append_new_message(data)
+        self.on_message_selected()
         self.chat_list.update_chat_preview(
             data["chat_id"], msg, increment_unread=False
         )
@@ -1210,6 +1214,7 @@ class MainFrame(wx.Frame):
         elif not file_path:
             self.SetStatusText("Recording failed")
             self._msg_frame.SetStatusText("Recording failed")
+            announce("Recording failed")
 
     def _send_voice_thread(self, entity, file_path):
         try:
@@ -1271,6 +1276,7 @@ class MainFrame(wx.Frame):
             log.error("Failed to download voice message: %s", e)
             wx.CallAfter(self.SetStatusText, "Failed to download voice")
             wx.CallAfter(self._msg_frame.SetStatusText, "Failed to download voice")
+            wx.CallAfter(announce, "Failed to download voice")
 
     def _play_voice_file(self, path, label="voice message"):
         self.voice.play_voice(path)
@@ -1464,8 +1470,7 @@ class MainFrame(wx.Frame):
                 if msg:
                     self._current_messages.insert(0, msg)
                 self.message_panel.append_new_message(data)
-                if msg:
-                    self.message_panel.update_inline_buttons(msg)
+                self.on_message_selected()
                 # Mark as read since the chat is currently open,
                 # then reload dialogs so the unread count clears.
                 entity = self._current_entity
@@ -1496,7 +1501,10 @@ class MainFrame(wx.Frame):
         if self._current_entity:
             current_id = getattr(self._current_entity, "id", None)
             if current_id and data["chat_id"] == current_id:
+                if msg:
+                    self._current_messages.insert(0, msg)
                 self.message_panel.append_new_message(data)
+                self.on_message_selected()
         msg = data.get("message")
         chat_id = data.get("chat_id")
         if msg:
@@ -1574,6 +1582,7 @@ class MainFrame(wx.Frame):
         else:
             self.SetStatusText("No active call")
             self._msg_frame.SetStatusText("No active call")
+            announce("No active call")
 
     def _hangup_thread(self):
         try:
@@ -1623,6 +1632,7 @@ class MainFrame(wx.Frame):
             if result is None:
                 wx.CallAfter(self.SetStatusText, "Call accept failed")
                 wx.CallAfter(self._msg_frame.SetStatusText, "Call accept failed")
+                wx.CallAfter(announce, "Call accept failed")
                 return
             status = "Call connected"
             wx.CallAfter(self.SetStatusText, status)
@@ -1734,6 +1744,7 @@ class MainFrame(wx.Frame):
                 self.config["camera_device_index"] = dlg.GetCameraDeviceIndex()
                 self.config["sounds_enabled"] = dlg.GetSoundsEnabled()
                 self.config["sound_pack"] = dlg.GetSoundPack()
+                self.config["time_format"] = dlg.GetTimeFormat()
                 self.config.save()
                 self.sound.set_output_device(dlg.GetOutputDeviceIndex())
 
@@ -2661,15 +2672,41 @@ class MainFrame(wx.Frame):
         from .theme import apply_theme
 
         parent = self._msg_frame if self._msg_frame.IsShown() else self
-        dlg = wx.SingleChoiceDialog(
+        dlg = wx.Dialog(
             parent,
-            "This message contains multiple links. Choose one to open:",
-            "Open Link",
-            urls,
+            title="Open Link",
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
         )
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(
+            wx.StaticText(
+                dlg,
+                label="This message contains multiple links. Choose one to open:",
+            ),
+            flag=wx.ALL,
+            border=10,
+        )
+        url_list = wx.ListBox(dlg, choices=urls, style=wx.LB_SINGLE)
+        url_list.SetName("Links")
+        url_list.SetSelection(0)
+        sizer.Add(url_list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        btn_sizer = dlg.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+        dlg.SetSizerAndFit(sizer)
+        dlg.SetMinSize((400, 250))
+        dlg.CenterOnParent()
+        url_list.SetFocus()
+
+        def _on_dclick(event):
+            dlg.EndModal(wx.ID_OK)
+
+        url_list.Bind(wx.EVT_LISTBOX_DCLICK, _on_dclick)
         apply_theme(dlg)
+
         if dlg.ShowModal() == wx.ID_OK:
-            webbrowser.open(dlg.GetStringSelection())
+            sel = url_list.GetSelection()
+            if sel != wx.NOT_FOUND:
+                webbrowser.open(url_list.GetString(sel))
         dlg.Destroy()
 
     def _on_check_updates(self, event):
