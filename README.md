@@ -26,6 +26,8 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 - Interact with bot inline buttons for bots that support it.
 - Unread message counts are shown in the chat list and cleared automatically when you open a chat.
 - Message timestamps are displayed in your local timezone.
+- Choose between 12-hour and 24-hour time format in Settings.
+- Click the Open Link button to open URLs contained in a message. If a message contains multiple URLs, a list lets you choose which one to open.
 
 ### Files browser
 
@@ -86,6 +88,7 @@ Teepee plays notification sounds for sent messages, received messages, group mes
 - A Keyboard Shortcuts reference is available from the Help menu or by pressing F1.
 - Dark mode detected automatically with a matching dark theme applied, including dark title bars on Windows.
 - High contrast mode is detected and respected.
+- Automatic update checking on launch with a manual Check for Updates option in the Help menu.
 - System tray integration: closing the window minimises to tray; a balloon notification confirms.
 - Right-click context menu on the chat list for quick access to mute, unmute, and delete actions.
 
@@ -239,6 +242,7 @@ Press Ctrl+, or open the Settings menu to configure:
 - Camera device for video calls.
 - Notification sounds on or off.
 - Sound pack selection (see the Sound packs section above for how to create custom packs).
+- Time format: choose between 12-hour (1:30 PM) and 24-hour (13:30) display.
 
 ### Account
 
