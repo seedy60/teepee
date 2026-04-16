@@ -1,3 +1,4 @@
+import threading
 import wx
 
 from .theme import apply_theme
@@ -56,13 +57,53 @@ class SettingsDialog(wx.Dialog):
             self.input_choice, flag=wx.EXPAND | wx.ALL, border=5
         )
 
+        # --- Device test buttons ---
+        test_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        self.test_speaker_btn = wx.Button(self, label="Test Speaker")
+        self.test_speaker_btn.SetName("Test Speaker")
+        self.test_speaker_btn.Bind(wx.EVT_BUTTON, self._on_test_speaker)
+        test_sizer.Add(self.test_speaker_btn, flag=wx.ALL, border=5)
+
+        self.test_mic_btn = wx.Button(self, label="Test Microphone")
+        self.test_mic_btn.SetName("Test Microphone")
+        self.test_mic_btn.Bind(wx.EVT_BUTTON, self._on_test_mic)
+        test_sizer.Add(self.test_mic_btn, flag=wx.ALL, border=5)
+
+        audio_box.Add(test_sizer, flag=wx.EXPAND)
+
         sizer.Add(audio_box, flag=wx.EXPAND | wx.ALL, border=10)
+
+        # --- Video device ---
+        video_box = wx.StaticBoxSizer(wx.VERTICAL, self, "Video")
+
+        video_box.Add(
+            wx.StaticText(self, label="Camera:"),
+            flag=wx.LEFT | wx.TOP,
+            border=5,
+        )
+
+        video_devices = sound_manager.get_video_devices()
+        camera_choices = ["None (no camera)"] + video_devices
+        self.camera_choice = wx.Choice(self, choices=camera_choices)
+        self.camera_choice.SetName("Camera")
+        current_camera = config.get("camera_device_index", -1)
+        if 0 <= current_camera < len(video_devices):
+            self.camera_choice.SetSelection(current_camera + 1)
+        else:
+            self.camera_choice.SetSelection(0)
+        video_box.Add(
+            self.camera_choice, flag=wx.EXPAND | wx.ALL, border=5
+        )
+
+        sizer.Add(video_box, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
 
         # --- Notifications ---
         sounds_box = wx.StaticBoxSizer(wx.VERTICAL, self, "Notifications")
         self.sounds_enabled = wx.CheckBox(
             self, label="Enable notification sounds"
         )
+        self.sounds_enabled.SetName("Enable notification sounds")
         self.sounds_enabled.SetValue(config.get("sounds_enabled", True))
         sounds_box.Add(self.sounds_enabled, flag=wx.ALL, border=5)
 
@@ -105,6 +146,12 @@ class SettingsDialog(wx.Dialog):
     def GetInputDeviceIndex(self):
         return self.input_choice.GetSelection()
 
+    def GetCameraDeviceIndex(self):
+        sel = self.camera_choice.GetSelection()
+        if sel <= 0:
+            return -1
+        return sel - 1
+
     def GetSoundsEnabled(self):
         return self.sounds_enabled.GetValue()
 
@@ -113,3 +160,79 @@ class SettingsDialog(wx.Dialog):
         if idx != wx.NOT_FOUND:
             return self.sound_pack_choice.GetString(idx)
         return "default"
+
+    def _on_test_speaker(self, event):
+        idx = self.output_choice.GetSelection()
+        self.sound_manager.set_output_device(idx)
+        stream = self.sound_manager.play_test_tone()
+        if stream:
+            self.test_speaker_btn.SetLabel("Playing...")
+            self.test_speaker_btn.Disable()
+
+            def _reset():
+                import time
+                time.sleep(2)
+                wx.CallAfter(self._speaker_test_done)
+
+            threading.Thread(target=_reset, daemon=True).start()
+        else:
+            wx.MessageBox(
+                "Could not play test tone.",
+                "Speaker Test",
+                wx.OK | wx.ICON_WARNING,
+                self,
+            )
+
+    def _speaker_test_done(self):
+        if self.test_speaker_btn:
+            self.test_speaker_btn.SetLabel("Test Speaker")
+            self.test_speaker_btn.Enable()
+            self.test_speaker_btn.SetFocus()
+
+    def _on_test_mic(self, event):
+        if getattr(self, "_recording", None) is not None:
+            self._stop_mic_test()
+            return
+        self._recording = self.sound_manager.record_test()
+        if self._recording is None:
+            wx.MessageBox(
+                "Could not start microphone recording.",
+                "Microphone Test",
+                wx.OK | wx.ICON_WARNING,
+                self,
+            )
+            return
+        self.test_mic_btn.SetLabel("Stop Recording (3s)")
+        self.test_mic_btn.SetName("Stop Recording")
+
+        def _auto_stop():
+            import time
+            time.sleep(3)
+            wx.CallAfter(self._stop_mic_test)
+
+        threading.Thread(target=_auto_stop, daemon=True).start()
+
+    def _stop_mic_test(self):
+        rec = getattr(self, "_recording", None)
+        self._recording = None
+        self.test_mic_btn.SetLabel("Test Microphone")
+        self.test_mic_btn.SetName("Test Microphone")
+        if rec is not None:
+            stream = self.sound_manager.stop_recording_and_play(rec)
+            if stream:
+                self.test_mic_btn.SetLabel("Playing back...")
+                self.test_mic_btn.Disable()
+
+                def _reset():
+                    import time
+                    time.sleep(3)
+                    wx.CallAfter(self._mic_playback_done)
+
+                threading.Thread(target=_reset, daemon=True).start()
+
+    def _mic_playback_done(self):
+        if self.test_mic_btn:
+            self.test_mic_btn.SetLabel("Test Microphone")
+            self.test_mic_btn.SetName("Test Microphone")
+            self.test_mic_btn.Enable()
+            self.test_mic_btn.SetFocus()

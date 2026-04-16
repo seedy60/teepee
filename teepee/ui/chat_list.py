@@ -11,10 +11,12 @@ class ChatListPanel(wx.Panel):
         btn_row = wx.BoxSizer(wx.HORIZONTAL)
 
         self.new_chat_btn = wx.Button(self, label="&New Chat")
+        self.new_chat_btn.SetName("New Chat")
         self.new_chat_btn.SetToolTip("Start a new chat with a user")
         btn_row.Add(self.new_chat_btn, 1, wx.ALL, 5)
 
         self.delete_chat_btn = wx.Button(self, label="De&lete Chat")
+        self.delete_chat_btn.SetName("Delete Chat")
         self.delete_chat_btn.SetToolTip("Delete the selected chat")
         btn_row.Add(self.delete_chat_btn, 1, wx.ALL, 5)
 
@@ -141,6 +143,20 @@ class ChatListPanel(wx.Panel):
             self.list_ctrl.SetSelection(new_sel)
         self.list_ctrl.Thaw()
         self._updating = False
+
+    def update_chat_preview(self, chat_id, message, increment_unread=True):
+        for i, dialog in enumerate(self._dialogs):
+            entity_id = getattr(dialog.entity, "id", None)
+            if entity_id == chat_id:
+                dialog.message = message
+                if increment_unread:
+                    dialog.unread_count = (dialog.unread_count or 0) + 1
+                # Move to top of list
+                self._dialogs.remove(dialog)
+                self._dialogs.insert(0, dialog)
+                self._apply_filter()
+                return True
+        return False
 
     def _on_list_key(self, event):
         if event.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):

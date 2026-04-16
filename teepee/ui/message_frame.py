@@ -1,5 +1,6 @@
 import wx
 
+from .files_panel import FilesPanel
 from .message_panel import MessagePanel
 from .theme import apply_theme
 
@@ -9,11 +10,18 @@ class MessageFrame(wx.Frame):
         super().__init__(parent, title="Teepee - Messages", size=(700, 500))
         self.main_frame = parent
 
-        self.message_panel = MessagePanel(self, parent)
+        self.notebook = wx.Notebook(self)
+        self.notebook.SetName("Chat tabs")
+
+        self.message_panel = MessagePanel(self.notebook, parent)
         self.message_panel.set_enabled(False)
+        self.notebook.AddPage(self.message_panel, "Messages")
+
+        self.files_panel = FilesPanel(self.notebook, parent)
+        self.notebook.AddPage(self.files_panel, "Files")
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(self.message_panel, 1, wx.EXPAND)
+        sizer.Add(self.notebook, 1, wx.EXPAND)
         self.SetSizer(sizer)
 
         self.CreateStatusBar()
@@ -40,6 +48,8 @@ class MessageFrame(wx.Frame):
             wx.TheClipboard.Close()
             self.main_frame.SetStatusText("Message copied")
             self.SetStatusText("Message copied")
+            from .announce import announce
+            announce("Message copied")
 
     def _on_char_hook(self, event):
         key = event.GetKeyCode()
@@ -64,6 +74,15 @@ class MessageFrame(wx.Frame):
             self.main_frame.reply_to_selected_message()
             return
 
+        if (
+            key == ord("E")
+            and event.ControlDown()
+            and not event.ShiftDown()
+            and not event.AltDown()
+        ):
+            self.main_frame.edit_selected_message()
+            return
+
         if key == wx.WXK_ESCAPE:
             if self.message_panel._reply_to_msg:
                 self.message_panel.clear_reply()
@@ -81,6 +100,9 @@ class MessageFrame(wx.Frame):
                 return
             if key == ord("H"):
                 self.main_frame._on_hangup(event)
+                return
+            if key == ord("V"):
+                self.main_frame._on_video_call(event)
                 return
             if key == ord("A"):
                 self.message_panel._on_attach(event)
@@ -103,6 +125,14 @@ class MessageFrame(wx.Frame):
                 return
             if key == ord("3"):
                 self.message_panel.input_ctrl.SetFocus()
+                return
+            if key == ord("4"):
+                self.notebook.SetSelection(1)
+                self.files_panel.file_list.SetFocus()
+                return
+            if key == ord("5"):
+                self.notebook.SetSelection(1)
+                self.files_panel.search_ctrl.SetFocus()
                 return
             if key == ord("Q"):
                 self.main_frame.quit()

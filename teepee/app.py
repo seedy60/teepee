@@ -19,6 +19,7 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     stream=sys.stderr,
 )
+logging.getLogger("teepee.call_manager").setLevel(logging.DEBUG)
 
 
 class TeepeeApp(wx.App):
@@ -30,6 +31,7 @@ class TeepeeApp(wx.App):
         self.sound_manager = SoundManager(self.config)
         self.voice_manager = VoiceManager(self.config, self.sound_manager)
         self.call_manager = CallManager(self.telegram_manager, self.config)
+        self.telegram_manager.call_manager = self.call_manager
 
         self.telegram_manager.start()
 
@@ -71,3 +73,9 @@ def main():
 
     app = TeepeeApp(redirect=False)
     app.MainLoop()
+    # MainLoop returned -- force-terminate to avoid DLL-cleanup deadlocks.
+    import signal
+    try:
+        os.kill(os.getpid(), signal.SIGTERM)
+    except Exception:
+        os._exit(0)

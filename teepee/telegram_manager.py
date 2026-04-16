@@ -19,6 +19,7 @@ class TelegramManager:
         self.on_new_message = None
         self.on_message_sent = None
         self.on_incoming_call = None
+        self.call_manager = None
 
     def start(self):
         self._loop = asyncio.new_event_loop()
@@ -64,6 +65,16 @@ class TelegramManager:
     async def get_messages(self, entity, limit=50):
         return await self.client.get_messages(entity, limit=limit)
 
+    async def search_files(self, entity, query="", limit=50, offset_id=0):
+        from telethon.tl.types import InputMessagesFilterDocument
+        return await self.client.get_messages(
+            entity,
+            limit=limit,
+            search=query or None,
+            filter=InputMessagesFilterDocument,
+            offset_id=offset_id,
+        )
+
     async def mark_as_read(self, entity):
         return await self.client.send_read_acknowledge(entity)
 
@@ -82,6 +93,9 @@ class TelegramManager:
 
     async def download_media(self, message, path):
         return await self.client.download_media(message, file=str(path))
+
+    async def edit_message(self, entity, message_id, new_text):
+        return await self.client.edit_message(entity, message_id, new_text)
 
     async def delete_messages(self, entity, message_ids, revoke=True):
         return await self.client.delete_messages(entity, message_ids, revoke=revoke)
@@ -387,6 +401,48 @@ class TelegramManager:
             }
             wx.CallAfter(self.on_message_sent, data)
 
+        @self.client.on(events.Raw)
+        async def _on_raw(event):
+            from telethon.tl.types import (
+                UpdatePhoneCall,
+                UpdatePhoneCallSignalingData,
+            )
+
+            # Forward signaling data to ntgcalls
+            if isinstance(event, UpdatePhoneCallSignalingData):
+                if self.call_manager:
+                    await self.call_manager.receive_signaling(event.data)
+                return
+
+            if not isinstance(event, UpdatePhoneCall):
+                return
+
+            phone_call = event.phone_call
+            from telethon.tl.types import PhoneCallRequested
+
+            if isinstance(phone_call, PhoneCallRequested):
+                # Prepare DH data in call_manager before showing dialog
+                if self.call_manager:
+                    await self.call_manager.prepare_incoming(phone_call)
+                if not self.on_incoming_call:
+                    return
+                caller_id = phone_call.admin_id
+                try:
+                    caller = await self.client.get_entity(caller_id)
+                    first = getattr(caller, "first_name", None) or ""
+                    last = getattr(caller, "last_name", None) or ""
+                    caller_name = f"{first} {last}".strip() or "Unknown"
+                except Exception:
+                    caller_name = "Unknown"
+                wx.CallAfter(
+                    self.on_incoming_call, phone_call, caller_name
+                )
+            else:
+                # Forward PhoneCallAccepted, PhoneCall, PhoneCallDiscarded
+                # to call_manager for the connect flow
+                if self.call_manager:
+                    await self.call_manager.handle_call_update(phone_call)
+
     def stop(self):
         if self._loop and self._loop.is_running():
             if self.client and self.client.is_connected():
@@ -394,9 +450,9 @@ class TelegramManager:
                     future = asyncio.run_coroutine_threadsafe(
                         self.disconnect(), self._loop
                     )
-                    future.result(timeout=5)
+                    future.result(timeout=2)
                 except Exception as e:
                     log.debug("Shutdown disconnect error: %s", e)
             self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread:
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=2)

@@ -1,6 +1,7 @@
 import wx
 
 from .theme import apply_theme, is_dark_mode
+from .announce import announce
 
 
 try:
@@ -38,6 +39,7 @@ class MessagePanel(wx.Panel):
 
         # --- Bot inline buttons panel (hidden by default) ---
         self.buttons_panel = wx.Panel(self)
+        self.buttons_panel.SetName("Bot actions")
         self.buttons_sizer = wx.WrapSizer(wx.HORIZONTAL)
         self.buttons_panel.SetSizer(self.buttons_sizer)
         sizer.Add(
@@ -55,6 +57,7 @@ class MessagePanel(wx.Panel):
             self.reply_label, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 5
         )
         self.cancel_reply_btn = wx.Button(self, label="&Cancel reply")
+        self.cancel_reply_btn.SetName("Cancel reply")
         self.cancel_reply_btn.SetToolTip("Cancel replying to this message")
         self.reply_sizer.Add(self.cancel_reply_btn, 0, wx.ALL, 2)
         sizer.Add(self.reply_sizer, 0, wx.EXPAND)
@@ -64,22 +67,37 @@ class MessagePanel(wx.Panel):
         self.msg_actions_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         self.play_btn = wx.Button(self, label="&Play")
+        self.play_btn.SetName("Play")
         self.play_btn.SetToolTip("Play the selected voice message")
         self.msg_actions_sizer.Add(self.play_btn, 0, wx.ALL, 2)
         self.play_btn.Hide()
 
         self.save_btn = wx.Button(self, label="Sa&ve")
+        self.save_btn.SetName("Save")
         self.save_btn.SetToolTip("Save the selected file or voice message")
         self.msg_actions_sizer.Add(self.save_btn, 0, wx.ALL, 2)
         self.save_btn.Hide()
 
         self.delete_msg_btn = wx.Button(self, label="&Delete")
+        self.delete_msg_btn.SetName("Delete")
         self.delete_msg_btn.SetToolTip("Delete the selected message")
         self.msg_actions_sizer.Add(self.delete_msg_btn, 0, wx.ALL, 2)
 
+        self.edit_msg_btn = wx.Button(self, label="&Edit")
+        self.edit_msg_btn.SetName("Edit")
+        self.edit_msg_btn.SetToolTip("Edit the selected sent message")
+        self.msg_actions_sizer.Add(self.edit_msg_btn, 0, wx.ALL, 2)
+
         self.reply_btn = wx.Button(self, label="&Reply")
+        self.reply_btn.SetName("Reply")
         self.reply_btn.SetToolTip("Reply to the selected message")
         self.msg_actions_sizer.Add(self.reply_btn, 0, wx.ALL, 2)
+
+        self.open_link_btn = wx.Button(self, label="Open &Link")
+        self.open_link_btn.SetName("Open Link")
+        self.open_link_btn.SetToolTip("Open a URL from the selected message")
+        self.msg_actions_sizer.Add(self.open_link_btn, 0, wx.ALL, 2)
+        self.open_link_btn.Hide()
 
         sizer.Add(self.msg_actions_sizer, 0, wx.LEFT | wx.RIGHT, 5)
         sizer.Hide(self.msg_actions_sizer)
@@ -97,14 +115,17 @@ class MessagePanel(wx.Panel):
         btn_sizer = wx.BoxSizer(wx.VERTICAL)
 
         self.send_btn = wx.Button(self, label="&Send")
+        self.send_btn.SetName("Send")
         self.send_btn.SetToolTip("Send the message")
         btn_sizer.Add(self.send_btn, 0, wx.ALL, 2)
 
         self.attach_btn = wx.Button(self, label="&Attach")
+        self.attach_btn.SetName("Attach")
         self.attach_btn.SetToolTip("Send a file")
         btn_sizer.Add(self.attach_btn, 0, wx.ALL, 2)
 
         self.voice_btn = wx.Button(self, label="&Voice")
+        self.voice_btn.SetName("Voice")
         self.voice_btn.SetToolTip("Record a voice message")
         btn_sizer.Add(self.voice_btn, 0, wx.ALL, 2)
 
@@ -121,8 +142,10 @@ class MessagePanel(wx.Panel):
         self.play_btn.Bind(wx.EVT_BUTTON, self._on_play)
         self.save_btn.Bind(wx.EVT_BUTTON, self._on_save)
         self.delete_msg_btn.Bind(wx.EVT_BUTTON, self._on_delete_message)
+        self.edit_msg_btn.Bind(wx.EVT_BUTTON, self._on_edit_message)
         self.reply_btn.Bind(wx.EVT_BUTTON, self._on_reply)
         self.cancel_reply_btn.Bind(wx.EVT_BUTTON, self._on_cancel_reply)
+        self.open_link_btn.Bind(wx.EVT_BUTTON, self._on_open_link)
         self.messages_list.Bind(wx.EVT_LISTBOX, self._on_message_selected)
 
     def _show_chat(self):
@@ -172,16 +195,40 @@ class MessagePanel(wx.Panel):
         if msg.reply_to:
             reply_prefix = "[Reply] "
 
+        edited_suffix = ""
+        if getattr(msg, "edit_date", None):
+            edited_suffix = " (edited)"
+
         if msg.voice:
             text = "[Voice message]"
         elif msg.text:
             text = msg.text.replace("\n", " | ")
         elif msg.media:
             text = f"[{self._media_label(msg.media)}]"
+        elif msg.action:
+            text = self._action_label(msg.action)
         else:
             text = "[Empty message]"
 
-        return f"[{time_str}] {sender}: {reply_prefix}{text}"
+        return f"[{time_str}] {sender}: {reply_prefix}{text}{edited_suffix}"
+
+    @staticmethod
+    def _action_label(action):
+        type_name = type(action).__name__
+        labels = {
+            "MessageActionPhoneCall": "Phone call",
+            "MessageActionChatCreate": "Group created",
+            "MessageActionChatEditTitle": "Changed group title",
+            "MessageActionChatEditPhoto": "Changed group photo",
+            "MessageActionChatDeletePhoto": "Removed group photo",
+            "MessageActionChatAddUser": "Added user",
+            "MessageActionChatDeleteUser": "Removed user",
+            "MessageActionChatJoinedByLink": "Joined via link",
+            "MessageActionPinMessage": "Pinned a message",
+            "MessageActionContactSignUp": "Joined Telegram",
+            "MessageActionScreenshotTaken": "Screenshot taken",
+        }
+        return f"[{labels.get(type_name, 'Service message')}]"
 
     @staticmethod
     def _media_label(media):
@@ -239,6 +286,8 @@ class MessagePanel(wx.Panel):
                 text = f"[{self._media_label(msg.media)}]"
             else:
                 text = "[Media]"
+        elif data.get("message") and getattr(data["message"], "action", None):
+            text = self._action_label(data["message"].action)
         else:
             text = "[Empty message]"
 
@@ -292,6 +341,7 @@ class MessagePanel(wx.Panel):
             )
             self.frame.SetStatusText("Recording...")
             self.frame._msg_frame.SetStatusText("Recording...")
+            announce("Recording")
             self.frame.start_voice_recording()
         else:
             self._recording = False
@@ -299,6 +349,7 @@ class MessagePanel(wx.Panel):
             self.voice_btn.SetToolTip("Record a voice message")
             self.frame.SetStatusText("Recording stopped, sending...")
             self.frame._msg_frame.SetStatusText("Recording stopped, sending...")
+            announce("Recording stopped, sending")
             self.frame.stop_voice_recording()
 
     def _on_play(self, event):
@@ -312,6 +363,9 @@ class MessagePanel(wx.Panel):
 
     def _on_cancel_reply(self, event):
         self.clear_reply()
+
+    def _on_open_link(self, event):
+        self.frame.open_message_link()
 
     def set_reply(self, msg, preview_text):
         self._reply_to_msg = msg
@@ -333,12 +387,19 @@ class MessagePanel(wx.Panel):
     def _on_delete_message(self, event):
         self.frame.delete_selected_message()
 
+    def _on_edit_message(self, event):
+        self.frame.edit_selected_message()
+
     def get_selected_message_index(self):
         return self.messages_list.GetSelection()
 
     def remove_message_at(self, index):
         if 0 <= index < self.messages_list.GetCount():
             self.messages_list.Delete(index)
+
+    def update_message_at(self, index, msg):
+        if 0 <= index < self.messages_list.GetCount():
+            self.messages_list.SetString(index, self._format_message_obj(msg))
 
     def show_play_button(self, show, label="&Play", tooltip="Play the selected voice message"):
         if show:
@@ -364,6 +425,17 @@ class MessagePanel(wx.Panel):
             self.save_btn.Hide()
             self.msg_actions_sizer.Layout()
 
+    def show_open_link_button(self, show):
+        if show:
+            if not self.open_link_btn.IsShown():
+                self.open_link_btn.Show()
+                self.msg_actions_sizer.Layout()
+        elif self.open_link_btn.IsShown():
+            if wx.Window.FindFocus() is self.open_link_btn:
+                self.messages_list.SetFocus()
+            self.open_link_btn.Hide()
+            self.msg_actions_sizer.Layout()
+
     def set_enabled(self, enabled):
         self.input_ctrl.Enable(enabled)
         self.send_btn.Enable(enabled)
@@ -371,7 +443,9 @@ class MessagePanel(wx.Panel):
         self.voice_btn.Enable(enabled)
         self.save_btn.Enable(enabled)
         self.delete_msg_btn.Enable(enabled)
+        self.edit_msg_btn.Enable(enabled)
         self.reply_btn.Enable(enabled)
+        self.open_link_btn.Enable(enabled)
         if not enabled:
             focused = wx.Window.FindFocus()
             if focused and self.IsDescendant(focused):
@@ -390,6 +464,7 @@ class MessagePanel(wx.Panel):
                 if KeyboardButtonUrl and isinstance(button, KeyboardButtonUrl):
                     label = f"{button.text} (link)"
                 btn = wx.Button(self.buttons_panel, label=label)
+                btn.SetName(label)
                 btn.SetToolTip(self._button_tooltip(button))
                 if is_dark_mode():
                     apply_theme(btn)

@@ -233,12 +233,14 @@ class AccountDialog(wx.Dialog):
         self.upload_photo_btn = wx.Button(
             panel, label="&Upload Photo..."
         )
+        self.upload_photo_btn.SetName("Upload Photo")
         self.upload_photo_btn.SetToolTip("Upload a new profile photo")
         photo_sizer.Add(self.upload_photo_btn, 0, wx.ALL, 2)
 
         self.delete_photo_btn = wx.Button(
             panel, label="D&elete Current Photo"
         )
+        self.delete_photo_btn.SetName("Delete Current Photo")
         self.delete_photo_btn.SetToolTip(
             "Delete your current profile photo"
         )
@@ -349,6 +351,7 @@ class AccountDialog(wx.Dialog):
         self.terminate_btn = wx.Button(
             panel, label="&Terminate Selected Session"
         )
+        self.terminate_btn.SetName("Terminate Selected Session")
         self.terminate_btn.SetToolTip("End the selected session remotely")
         sizer.Add(
             self.terminate_btn,

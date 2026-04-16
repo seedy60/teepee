@@ -45,6 +45,22 @@ class SoundManager:
         except Exception:
             return ["Default"]
 
+    @staticmethod
+    def get_video_devices():
+        """Enumerate camera devices on a worker thread (COM-safe)."""
+        try:
+            from ntgcalls import NTgCalls
+            import concurrent.futures
+
+            def _enum():
+                devs = NTgCalls.get_media_devices()
+                return [cam.name for cam in devs.camera]
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(_enum).result(timeout=5)
+        except Exception:
+            return []
+
     def set_output_device(self, list_index):
         if not HAS_SOUND_LIB:
             return
@@ -66,11 +82,16 @@ class SoundManager:
                 except Exception:
                     pass
 
-    def play_file(self, path):
+    def play_file(self, path, looping=False):
         if not HAS_SOUND_LIB or not self._output:
             return None
         try:
             stream = FileStream(file=str(path))
+            if looping:
+                try:
+                    stream.looping = True
+                except Exception as e:
+                    log.warning("Failed to set looping on %s: %s", path, e)
             stream.play()
             self._active_streams.append(stream)
             self._cleanup_finished()
@@ -78,6 +99,17 @@ class SoundManager:
         except Exception as e:
             log.error("Failed to play %s: %s", path, e)
             return None
+
+    def _play_looping(self, name):
+        if not self.config.get("sounds_enabled", True):
+            return None
+        sounds_dir = self.config.sounds_dir
+        for ext in (".wav", ".mp3", ".ogg"):
+            path = sounds_dir / f"{name}{ext}"
+            if path.exists():
+                return self.play_file(path, looping=True)
+        log.debug("Sound file not found: %s", name)
+        return None
 
     def play_notification(self, name):
         if not self.config.get("sounds_enabled", True):
@@ -95,11 +127,49 @@ class SoundManager:
     def play_received(self):
         self.play_notification("received")
 
+    def play_reply_sent(self):
+        self.play_notification("reply_sent")
+
+    def play_reply_received(self):
+        self.play_notification("reply_received")
+
     def play_group_received(self):
         self.play_notification("group_received")
 
     def play_channel_received(self):
         self.play_notification("channel_received")
+
+    def play_call_in(self):
+        sounds_dir = self.config.sounds_dir
+        for ext in (".wav", ".mp3", ".ogg"):
+            path = sounds_dir / f"call_in{ext}"
+            if path.exists():
+                return self.play_file(path, looping=True)
+        log.debug("Sound file not found: call_in")
+        return None
+
+    def play_call_out(self):
+        sounds_dir = self.config.sounds_dir
+        for ext in (".wav", ".mp3", ".ogg"):
+            path = sounds_dir / f"call_out{ext}"
+            if path.exists():
+                return self.play_file(path, looping=True)
+        log.debug("Sound file not found: call_out")
+        return None
+
+    def play_ringing(self):
+        return self.play_notification("ringing")
+
+    def stop_stream(self, stream):
+        if stream:
+            try:
+                stream.looping = False
+                stream.stop()
+            except Exception:
+                pass
+
+    def stop_ringing(self, stream):
+        self.stop_stream(stream)
 
     def _cleanup_finished(self):
         still_active = []
@@ -110,3 +180,73 @@ class SoundManager:
             except Exception:
                 pass
         self._active_streams = still_active
+
+    def play_test_tone(self):
+        if not HAS_SOUND_LIB or not self._output:
+            return None
+        try:
+            import array
+            import struct
+            import tempfile
+            import math
+
+            sample_rate = 44100
+            duration = 2
+            freq = 440.0
+            total = sample_rate * duration
+            buf = bytearray(total * 2)
+            for i in range(total):
+                v = 0.5 * math.sin(2.0 * math.pi * freq * i / sample_rate)
+                struct.pack_into("<h", buf, i * 2, int(v * 32767))
+            path = Path(tempfile.gettempdir()) / "teepee_test_tone.wav"
+            import wave
+            with wave.open(str(path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes(bytes(buf))
+            return self.play_file(path)
+        except Exception as e:
+            log.error("Failed to generate test tone: %s", e)
+            return None
+
+    def record_test(self):
+        if not HAS_SOUND_LIB:
+            return None
+        try:
+            from sound_lib.input import Input
+            from sound_lib.recording import Recording
+
+            list_index = self.config.get("input_device_index", -1)
+            bass_device = list_index + 1 if list_index >= 0 else -1
+            self._test_input = Input(device=bass_device)
+            rec = Recording(frequency=44100, channels=1)
+            rec.play()
+            return rec
+        except Exception as e:
+            log.error("Failed to start recording: %s", e)
+            return None
+
+    def stop_recording_and_play(self, rec):
+        if rec is None:
+            return None
+        try:
+            rec.stop()
+            import wave
+            import tempfile
+
+            length = rec.get_position()
+            if length <= 0:
+                log.warning("No audio data captured")
+                return None
+            data = bytes(rec.get_data(length))
+            path = Path(tempfile.gettempdir()) / "teepee_mic_test.wav"
+            with wave.open(str(path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(44100)
+                wf.writeframes(data)
+            return self.play_file(path)
+        except Exception as e:
+            log.error("Failed to play back recording: %s", e)
+            return None

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "cryptg>=0.5.2",
+    "opencv-python>=4.13.0.92",
     "pydub>=0.25.1",
     "pyinstaller>=6.19.0",
     "pyinstaller-versionfile>=3.1.0",

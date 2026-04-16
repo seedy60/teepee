@@ -13,7 +13,9 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 - Send and receive text messages, voice messages, files, and media.
 - Messages open in a separate window when you select a chat, keeping the chat list always visible.
 - Browse your chat list with a live search filter.
-- Reply to, delete, and manage messages with keyboard shortcuts.
+- Reply to, edit, delete, and manage messages with keyboard shortcuts.
+- Edit your own sent text messages with Ctrl+E.
+- Copy a message to the clipboard with Ctrl+C when the message list is focused.
 - When deleting a message or chat, choose whether to delete for yourself only or for everyone.
 - Record and send voice messages directly from the app.
 - Send files using the Attach button or Ctrl+Shift+A.
@@ -25,10 +27,20 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 - Unread message counts are shown in the chat list and cleared automatically when you open a chat.
 - Message timestamps are displayed in your local timezone.
 
+### Files browser
+
+- Groups and channels have a Files tab that lists all shared documents.
+- Search files by name with server-side search.
+- Download files directly from the file list.
+- Load more to fetch older files.
+
 ### Calls
 
 - Start voice calls with contacts using Ctrl+Shift+C.
+- Start video calls with contacts using Ctrl+Shift+V. If the camera fails, the call falls back to voice automatically.
 - Hang up with Ctrl+Shift+H.
+- Mute and unmute your microphone during a call.
+- Incoming calls show a dialog with Accept and Decline buttons. Both voice and video calls are supported.
 
 ### Account management
 
@@ -68,7 +80,7 @@ Teepee plays notification sounds for sent messages, received messages, group mes
 ### Accessibility
 
 - All on-screen elements - buttons, text fields, lists, and dialogs - are clearly labelled for screen reader users.
-- Keyboard-friendly navigation with Tab, arrow keys, and area shortcuts (Ctrl+1 for chat list, Ctrl+2 for messages, Ctrl+3 for message input).
+- Keyboard-friendly navigation with Tab, arrow keys, and area shortcuts (Ctrl+1 for chat list, Ctrl+2 for messages, Ctrl+3 for message input, Ctrl+4 for files list, Ctrl+5 for file search).
 - Focus is managed throughout the app: after closing dialogs, deleting messages, switching chats, and restoring from the system tray, focus returns to a logical target.
 - Status messages are mirrored to both the main window and message window, so screen reader users always get feedback regardless of which window has focus.
 - A Keyboard Shortcuts reference is available from the Help menu or by pressing F1.
@@ -187,19 +199,24 @@ The following table lists all keyboard shortcuts grouped by category.
 | Ctrl+1 | Focus chat list |
 | Ctrl+2 | Focus message list |
 | Ctrl+3 | Focus message input |
+| Ctrl+4 | Focus files list (groups and channels) |
+| Ctrl+5 | Focus file search (groups and channels) |
 | Enter | Send message (when in the input field) |
 | Shift+Enter | New line in message |
 | Ctrl+R | Reply to selected message |
+| Ctrl+E | Edit selected sent message |
 | Ctrl+C | Copy selected message to clipboard (in message list) |
 | Ctrl+Shift+A | Attach and send a file |
 | Ctrl+Shift+S | Save the selected voice message or file attachment |
 | Escape | Cancel reply |
 | Delete | Delete selected message or chat (choose delete for me or for everyone) |
 | Ctrl+Shift+C | Start voice call |
+| Ctrl+Shift+V | Start video call |
 | Ctrl+Shift+H | Hang up |
-| Ctrl+, | Audio settings |
+| Ctrl+, | Settings |
 | F1 | Keyboard shortcuts |
-| Ctrl+Q | Exit |
+| Alt+F4 | Minimize to system tray |
+| Ctrl+Q | Quit |
 
 ### Group management
 
@@ -219,6 +236,7 @@ From the Group menu you can:
 Press Ctrl+, or open the Settings menu to configure:
 
 - Audio input and output devices.
+- Camera device for video calls.
 - Notification sounds on or off.
 - Sound pack selection (see the Sound packs section above for how to create custom packs).
 

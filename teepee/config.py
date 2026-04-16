@@ -8,6 +8,7 @@ DEFAULT_CONFIG = {
     "api_hash": "",
     "output_device_index": -1,
     "input_device_index": -1,
+    "camera_device_index": -1,
     "sounds_enabled": True,
     "sound_pack": "default",
 }
