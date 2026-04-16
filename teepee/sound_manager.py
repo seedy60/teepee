@@ -215,12 +215,25 @@ class SoundManager:
             return None
         try:
             from sound_lib.input import Input
-            from sound_lib.recording import Recording
+            from sound_lib.recording import WaveRecording
 
             list_index = self.config.get("input_device_index", -1)
-            bass_device = list_index + 1 if list_index >= 0 else -1
-            self._test_input = Input(device=bass_device)
-            rec = Recording(frequency=44100, channels=1)
+            bass_device = list_index - 1 if list_index > 0 else -1
+            try:
+                self._test_input = Input(device=bass_device)
+            except Exception:
+                # Already initialized (e.g. by VoiceManager) — that's fine,
+                # BASS_RecordSetDevice will select the right device.
+                from sound_lib.external.pybass import BASS_RecordSetDevice
+                if bass_device >= 0:
+                    BASS_RecordSetDevice(bass_device)
+            import tempfile
+            self._test_rec_path = str(
+                Path(tempfile.gettempdir()) / "teepee_mic_test.wav"
+            )
+            rec = WaveRecording(
+                filename=self._test_rec_path, frequency=44100, channels=1,
+            )
             rec.play()
             return rec
         except Exception as e:
@@ -232,20 +245,10 @@ class SoundManager:
             return None
         try:
             rec.stop()
-            import wave
-            import tempfile
-
-            length = rec.get_position()
-            if length <= 0:
-                log.warning("No audio data captured")
+            path = getattr(self, "_test_rec_path", None)
+            if not path:
+                log.warning("No test recording path")
                 return None
-            data = bytes(rec.get_data(length))
-            path = Path(tempfile.gettempdir()) / "teepee_mic_test.wav"
-            with wave.open(str(path), "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(44100)
-                wf.writeframes(data)
             return self.play_file(path)
         except Exception as e:
             log.error("Failed to play back recording: %s", e)
