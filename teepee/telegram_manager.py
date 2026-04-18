@@ -18,6 +18,7 @@ class TelegramManager:
 
         self.on_new_message = None
         self.on_message_sent = None
+        self.on_message_edited = None
         self.on_incoming_call = None
         self.call_manager = None
 
@@ -86,9 +87,9 @@ class TelegramManager:
             entity, file_path, voice_note=True, reply_to=reply_to
         )
 
-    async def send_file(self, entity, file_path, reply_to=None):
+    async def send_file(self, entity, file_path, reply_to=None, caption=""):
         return await self.client.send_file(
-            entity, file_path, reply_to=reply_to
+            entity, file_path, caption=caption, reply_to=reply_to
         )
 
     async def download_media(self, message, path):
@@ -327,6 +328,32 @@ class TelegramManager:
             )
         )
 
+    async def get_blocked_users(self):
+        from telethon.tl.functions.contacts import GetBlockedRequest
+
+        result = await self.client(GetBlockedRequest(offset=0, limit=100))
+        return {getattr(u, "id", None) for u in result.users}
+
+    async def block_user(self, entity):
+        from telethon.tl.functions.contacts import BlockRequest
+
+        peer = await self.client.get_input_entity(entity)
+        return await self.client(BlockRequest(id=peer))
+
+    async def unblock_user(self, entity):
+        from telethon.tl.functions.contacts import UnblockRequest
+
+        peer = await self.client.get_input_entity(entity)
+        return await self.client(UnblockRequest(id=peer))
+
+    async def report_user(self, entity, reason, message=""):
+        from telethon.tl.functions.messages import ReportRequest
+
+        peer = await self.client.get_input_entity(entity)
+        return await self.client(
+            ReportRequest(peer=peer, id=[], reason=reason, message=message)
+        )
+
     async def disconnect(self):
         if self.client and self.client.is_connected():
             try:
@@ -378,6 +405,18 @@ class TelegramManager:
                 ),
             }
             wx.CallAfter(self.on_new_message, data)
+
+        @self.client.on(events.MessageEdited)
+        async def _on_edited(event):
+            if not self.on_message_edited:
+                return
+            msg = event.message
+            data = {
+                "message": msg,
+                "chat_id": event.chat_id,
+                "text": msg.text or "",
+            }
+            wx.CallAfter(self.on_message_edited, data)
 
         @self.client.on(events.NewMessage(outgoing=True))
         async def _on_outgoing(event):

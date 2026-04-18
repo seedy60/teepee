@@ -62,11 +62,13 @@ class SettingsDialog(wx.Dialog):
 
         self.test_speaker_btn = wx.Button(self, label="Test Speaker")
         self.test_speaker_btn.SetName("Test Speaker")
+        self.test_speaker_btn.SetToolTip("Play a test tone through the selected output device")
         self.test_speaker_btn.Bind(wx.EVT_BUTTON, self._on_test_speaker)
         test_sizer.Add(self.test_speaker_btn, flag=wx.ALL, border=5)
 
         self.test_mic_btn = wx.Button(self, label="Test Microphone")
         self.test_mic_btn.SetName("Test Microphone")
+        self.test_mic_btn.SetToolTip("Record a short clip and play it back")
         self.test_mic_btn.Bind(wx.EVT_BUTTON, self._on_test_mic)
         test_sizer.Add(self.test_mic_btn, flag=wx.ALL, border=5)
 
@@ -106,6 +108,16 @@ class SettingsDialog(wx.Dialog):
         self.sounds_enabled.SetName("Enable notification sounds")
         self.sounds_enabled.SetValue(config.get("sounds_enabled", True))
         sounds_box.Add(self.sounds_enabled, flag=wx.ALL, border=5)
+
+        self.notify_minimized = wx.CheckBox(
+            self, label="Show notifications when minimized"
+        )
+        self.notify_minimized.SetName("Show notifications when minimized")
+        self.notify_minimized.SetToolTip(
+            "Show a system notification when a new message arrives while Teepee is minimized"
+        )
+        self.notify_minimized.SetValue(config.get("notify_when_minimized", True))
+        sounds_box.Add(self.notify_minimized, flag=wx.ALL, border=5)
 
         sounds_box.Add(
             wx.StaticText(self, label="Sound Pack:"),
@@ -147,6 +159,32 @@ class SettingsDialog(wx.Dialog):
             self.time_format_choice, flag=wx.EXPAND | wx.ALL, border=5
         )
 
+        display_box.Add(
+            wx.StaticText(self, label="Number of chats to load:"),
+            flag=wx.LEFT | wx.TOP,
+            border=5,
+        )
+        self.chat_limit_spin = wx.SpinCtrl(
+            self, min=10, max=500, initial=config.get("chat_limit", 100)
+        )
+        self.chat_limit_spin.SetName("Number of chats to load")
+        display_box.Add(
+            self.chat_limit_spin, flag=wx.EXPAND | wx.ALL, border=5
+        )
+
+        display_box.Add(
+            wx.StaticText(self, label="Number of messages to load per chat:"),
+            flag=wx.LEFT | wx.TOP,
+            border=5,
+        )
+        self.message_limit_spin = wx.SpinCtrl(
+            self, min=10, max=500, initial=config.get("message_limit", 50)
+        )
+        self.message_limit_spin.SetName("Number of messages to load per chat")
+        display_box.Add(
+            self.message_limit_spin, flag=wx.EXPAND | wx.ALL, border=5
+        )
+
         sizer.Add(
             display_box,
             flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
@@ -184,16 +222,29 @@ class SettingsDialog(wx.Dialog):
             return self.sound_pack_choice.GetString(idx)
         return "default"
 
+    def GetNotifyWhenMinimized(self):
+        return self.notify_minimized.GetValue()
+
     def GetTimeFormat(self):
         return "12h" if self.time_format_choice.GetSelection() == 0 else "24h"
 
+    def GetChatLimit(self):
+        return self.chat_limit_spin.GetValue()
+
+    def GetMessageLimit(self):
+        return self.message_limit_spin.GetValue()
+
     def _on_test_speaker(self, event):
+        from .announce import announce
         idx = self.output_choice.GetSelection()
         self.sound_manager.set_output_device(idx)
         stream = self.sound_manager.play_test_tone()
         if stream:
             self.test_speaker_btn.SetLabel("Playing...")
+            self.test_speaker_btn.SetName("Playing")
+            self.test_speaker_btn.SetToolTip("Playing test tone")
             self.test_speaker_btn.Disable()
+            announce("Playing test tone")
 
             def _reset():
                 import time
@@ -210,12 +261,17 @@ class SettingsDialog(wx.Dialog):
             )
 
     def _speaker_test_done(self):
+        from .announce import announce
         if self.test_speaker_btn:
             self.test_speaker_btn.SetLabel("Test Speaker")
+            self.test_speaker_btn.SetName("Test Speaker")
+            self.test_speaker_btn.SetToolTip("Play a test tone through the selected output device")
             self.test_speaker_btn.Enable()
             self.test_speaker_btn.SetFocus()
+            announce("Speaker test complete")
 
     def _on_test_mic(self, event):
+        from .announce import announce
         if getattr(self, "_recording", None) is not None:
             self._stop_mic_test()
             return
@@ -230,6 +286,8 @@ class SettingsDialog(wx.Dialog):
             return
         self.test_mic_btn.SetLabel("Stop Recording (3s)")
         self.test_mic_btn.SetName("Stop Recording")
+        self.test_mic_btn.SetToolTip("Stop recording and play it back")
+        announce("Recording for 3 seconds")
 
         def _auto_stop():
             import time
@@ -239,15 +297,20 @@ class SettingsDialog(wx.Dialog):
         threading.Thread(target=_auto_stop, daemon=True).start()
 
     def _stop_mic_test(self):
+        from .announce import announce
         rec = getattr(self, "_recording", None)
         self._recording = None
         self.test_mic_btn.SetLabel("Test Microphone")
         self.test_mic_btn.SetName("Test Microphone")
+        self.test_mic_btn.SetToolTip("Record a short clip and play it back")
         if rec is not None:
             stream = self.sound_manager.stop_recording_and_play(rec)
             if stream:
                 self.test_mic_btn.SetLabel("Playing back...")
+                self.test_mic_btn.SetName("Playing back")
+                self.test_mic_btn.SetToolTip("Playing back microphone recording")
                 self.test_mic_btn.Disable()
+                announce("Playing back recording")
 
                 def _reset():
                     import time
@@ -257,8 +320,11 @@ class SettingsDialog(wx.Dialog):
                 threading.Thread(target=_reset, daemon=True).start()
 
     def _mic_playback_done(self):
+        from .announce import announce
         if self.test_mic_btn:
             self.test_mic_btn.SetLabel("Test Microphone")
             self.test_mic_btn.SetName("Test Microphone")
+            self.test_mic_btn.SetToolTip("Record a short clip and play it back")
             self.test_mic_btn.Enable()
             self.test_mic_btn.SetFocus()
+            announce("Microphone test complete")

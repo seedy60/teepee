@@ -56,6 +56,13 @@ class FilesPanel(wx.Panel):
         self.download_btn.Bind(wx.EVT_BUTTON, self._on_download)
         self.load_more_btn.Bind(wx.EVT_BUTTON, self._on_load_more)
         self.file_list.Bind(wx.EVT_LISTBOX_DCLICK, self._on_download)
+        self.file_list.Bind(wx.EVT_KEY_DOWN, self._on_file_list_key)
+
+    def _on_file_list_key(self, event):
+        if event.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+            self._on_download(event)
+        else:
+            event.Skip()
 
     def set_entity(self, entity):
         self._entity = entity

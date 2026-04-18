@@ -486,6 +486,9 @@ class AccountDialog(wx.Dialog):
         self._sessions.pop(idx)
         self.sessions_list.Delete(idx)
 
+        from .announce import announce
+        announce("Session marked for termination")
+
         count = self.sessions_list.GetCount()
         if count > 0:
             new_sel = min(idx, count - 1)

@@ -63,7 +63,7 @@ class MessagePanel(wx.Panel):
         sizer.Add(self.reply_sizer, 0, wx.EXPAND)
         sizer.Hide(self.reply_sizer)
 
-        # --- Message action buttons (Play, Save, Delete, Reply) ---
+        # --- Message action buttons (Play, Stop, Save, Delete, Reply) ---
         self.msg_actions_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         self.play_btn = wx.Button(self, label="&Play")
@@ -71,6 +71,12 @@ class MessagePanel(wx.Panel):
         self.play_btn.SetToolTip("Play the selected voice message")
         self.msg_actions_sizer.Add(self.play_btn, 0, wx.ALL, 2)
         self.play_btn.Hide()
+
+        self.stop_btn = wx.Button(self, label="S&top")
+        self.stop_btn.SetName("Stop")
+        self.stop_btn.SetToolTip("Stop playback")
+        self.msg_actions_sizer.Add(self.stop_btn, 0, wx.ALL, 2)
+        self.stop_btn.Hide()
 
         self.save_btn = wx.Button(self, label="Sa&ve")
         self.save_btn.SetName("Save")
@@ -140,6 +146,7 @@ class MessagePanel(wx.Panel):
         self.attach_btn.Bind(wx.EVT_BUTTON, self._on_attach)
         self.voice_btn.Bind(wx.EVT_BUTTON, self._on_voice)
         self.play_btn.Bind(wx.EVT_BUTTON, self._on_play)
+        self.stop_btn.Bind(wx.EVT_BUTTON, self._on_stop)
         self.save_btn.Bind(wx.EVT_BUTTON, self._on_save)
         self.delete_msg_btn.Bind(wx.EVT_BUTTON, self._on_delete_message)
         self.edit_msg_btn.Bind(wx.EVT_BUTTON, self._on_edit_message)
@@ -205,6 +212,10 @@ class MessagePanel(wx.Panel):
 
         if msg.voice:
             text = "[Voice message]"
+        elif msg.media and msg.text:
+            label = self._media_label(msg.media)
+            caption = msg.text.replace("\n", " | ")
+            text = f"[{label}] {caption}"
         elif msg.text:
             text = msg.text.replace("\n", " | ")
         elif msg.media:
@@ -240,20 +251,33 @@ class MessagePanel(wx.Panel):
         if type_name == "MessageMediaDocument":
             doc = getattr(media, "document", None)
             if doc:
+                filename = None
+                kind = None
                 for attr in getattr(doc, "attributes", []):
                     attr_name = type(attr).__name__
-                    if attr_name == "DocumentAttributeAudio":
+                    if attr_name == "DocumentAttributeFilename":
+                        filename = getattr(attr, "file_name", None)
+                    elif attr_name == "DocumentAttributeAudio":
                         if getattr(attr, "voice", False):
                             return "Voice message"
-                        return "Audio"
-                    if attr_name == "DocumentAttributeVideo":
+                        kind = "Audio"
+                    elif attr_name == "DocumentAttributeVideo":
                         if getattr(attr, "round_message", False):
                             return "Video message"
-                        return "Video"
-                    if attr_name == "DocumentAttributeSticker":
+                        kind = "Video"
+                    elif attr_name == "DocumentAttributeSticker":
                         return "Sticker"
-                    if attr_name == "DocumentAttributeAnimated":
+                    elif attr_name == "DocumentAttributeAnimated":
                         return "GIF"
+                if kind and filename:
+                    return f"{kind}: {filename}"
+                if kind:
+                    return kind
+                if filename:
+                    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+                    if ext in ("png", "jpg", "jpeg", "bmp", "gif", "webp", "tiff", "tif"):
+                        return f"Picture: {filename}"
+                    return f"File: {filename}"
             return "Document"
         labels = {
             "MessageMediaPhoto": "Photo",
@@ -282,6 +306,14 @@ class MessagePanel(wx.Panel):
 
         if data["is_voice"]:
             text = "[Voice message]"
+        elif data["is_media"] and data["text"]:
+            msg = data.get("message")
+            if msg and msg.media:
+                label = self._media_label(msg.media)
+                caption = data["text"].replace("\n", " | ")
+                text = f"[{label}] {caption}"
+            else:
+                text = data["text"].replace("\n", " | ")
         elif data["text"]:
             text = data["text"].replace("\n", " | ")
         elif data["is_media"]:
@@ -330,16 +362,30 @@ class MessagePanel(wx.Panel):
         ) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 path = dlg.GetPath()
+                caption = ""
+                caption_dlg = wx.TextEntryDialog(
+                    self.GetTopLevelParent(),
+                    "Enter a caption for this file (leave blank for none):",
+                    "File Caption",
+                    "",
+                )
+                caption_dlg.SetName("File Caption")
+                from .theme import apply_theme
+                apply_theme(caption_dlg)
+                if caption_dlg.ShowModal() == wx.ID_OK:
+                    caption = caption_dlg.GetValue().strip()
+                caption_dlg.Destroy()
                 reply_to = None
                 if self._reply_to_msg:
                     reply_to = self._reply_to_msg.id
                 self.clear_reply()
-                self.frame.send_file(path, reply_to=reply_to)
+                self.frame.send_file(path, reply_to=reply_to, caption=caption)
 
     def _on_voice(self, event):
         if not self._recording:
             self._recording = True
             self.voice_btn.SetLabel("S&top")
+            self.voice_btn.SetName("Stop recording")
             self.voice_btn.SetToolTip(
                 "Stop recording and send the voice message"
             )
@@ -350,6 +396,7 @@ class MessagePanel(wx.Panel):
         else:
             self._recording = False
             self.voice_btn.SetLabel("&Voice")
+            self.voice_btn.SetName("Voice")
             self.voice_btn.SetToolTip("Record a voice message")
             self.frame.SetStatusText("Recording stopped, sending...")
             self.frame._msg_frame.SetStatusText("Recording stopped, sending...")
@@ -358,6 +405,9 @@ class MessagePanel(wx.Panel):
 
     def _on_play(self, event):
         self.frame.play_last_voice()
+
+    def _on_stop(self, event):
+        self.frame.stop_voice_playback()
 
     def _on_save(self, event):
         self.frame.save_selected_media()
@@ -408,6 +458,7 @@ class MessagePanel(wx.Panel):
     def show_play_button(self, show, label="&Play", tooltip="Play the selected voice message"):
         if show:
             self.play_btn.SetLabel(label)
+            self.play_btn.SetName(label.replace("&", ""))
             self.play_btn.SetToolTip(tooltip)
             if not self.play_btn.IsShown():
                 self.play_btn.Show()
@@ -416,6 +467,17 @@ class MessagePanel(wx.Panel):
             if wx.Window.FindFocus() is self.play_btn:
                 self.messages_list.SetFocus()
             self.play_btn.Hide()
+            self.msg_actions_sizer.Layout()
+
+    def show_stop_button(self, show):
+        if show:
+            if not self.stop_btn.IsShown():
+                self.stop_btn.Show()
+                self.msg_actions_sizer.Layout()
+        elif self.stop_btn.IsShown():
+            if wx.Window.FindFocus() is self.stop_btn:
+                self.messages_list.SetFocus()
+            self.stop_btn.Hide()
             self.msg_actions_sizer.Layout()
 
     def show_save_button(self, show):

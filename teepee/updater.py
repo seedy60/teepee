@@ -23,12 +23,20 @@ DOWNLOAD_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/teepe
 
 
 def cleanup_old_files():
-    """Remove the staging directory left over from a previous update."""
+    """Remove the staging directory and updater batch file left over
+    from a previous update."""
     if not getattr(sys, "frozen", False):
         return
-    staging = Path(sys.executable).parent / "_update_staging"
+    app_dir = Path(sys.executable).parent
+    staging = app_dir / "_update_staging"
     if staging.is_dir():
         shutil.rmtree(staging, ignore_errors=True)
+    bat = app_dir / "_apply_update.bat"
+    if bat.is_file():
+        try:
+            bat.unlink()
+        except OSError:
+            pass
 
 
 def _parse_version(tag: str) -> tuple[int, ...]:
@@ -135,7 +143,9 @@ def _apply_via_batch(staging: Path):
     app_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path.cwd()
     exe = sys.executable if getattr(sys, "frozen", False) else None
     pid = os.getpid()
-    bat = staging / "_apply_update.bat"
+    # Place the batch file in the app directory (not inside staging)
+    # so xcopy of staging won't duplicate it, and it can self-delete.
+    bat = app_dir / "_apply_update.bat"
     lines = [
         "@echo off",
         f'echo Waiting for Teepee (PID {pid}) to exit...',
@@ -147,14 +157,13 @@ def _apply_via_batch(staging: Path):
         ")",
         f'echo Copying files to "{app_dir}"...',
         f'xcopy /s /y /q "{staging}\\*" "{app_dir}\\"',
+        f'rmdir /s /q "{staging}"',
     ]
     if exe:
         lines.append(f'echo Starting Teepee...')
         lines.append(f'start "" "{exe}"')
-    lines += [
-        f'rmdir /s /q "{staging}"',
-        "del /f /q \"%~f0\"",
-    ]
+    # Self-delete the batch file last
+    lines.append("del /f /q \"%~f0\"")
     bat.write_text("\r\n".join(lines), encoding="utf-8")
     subprocess.Popen(
         ["cmd.exe", "/c", str(bat)],

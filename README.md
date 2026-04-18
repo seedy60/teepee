@@ -17,9 +17,9 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 - Edit your own sent text messages with Ctrl+E.
 - Copy a message to the clipboard with Ctrl+C when the message list is focused.
 - When deleting a message or chat, choose whether to delete for yourself only or for everyone.
-- Record and send voice messages directly from the app.
+- Record and send voice messages directly from the client.
 - Send files using the Attach button or Ctrl+Shift+A.
-- Play received voice messages and audio files inline.
+- Play received voice messages and audio files in-client.
 - Play received video files in your default media player.
 - Download and save voice messages, photos, videos, audio files, and document attachments using the Save button or Ctrl+Shift+S.
 - Media types (audio, video, sticker, GIF, document) are clearly labelled in the message list and chat previews.
@@ -27,6 +27,8 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 - Unread message counts are shown in the chat list and cleared automatically when you open a chat.
 - Message timestamps are displayed in your local timezone.
 - Choose between 12-hour and 24-hour time format in Settings.
+- Configure how many chats and messages to load in Settings under Display.
+- Message edits from other users are reflected in real time in both the message list and chat preview.
 - Click the Open Link button to open URLs contained in a message. If a message contains multiple URLs, a list lets you choose which one to open.
 
 ### Files browser
@@ -39,10 +41,9 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 ### Calls
 
 - Start voice calls with contacts using Ctrl+Shift+C.
-- Start video calls with contacts using Ctrl+Shift+V. If the camera fails, the call falls back to voice automatically.
+- Start video calls using Ctrl+Shift+V. If the camera fails, the call falls back to voice automatically.
 - Hang up with Ctrl+Shift+H.
 - Mute and unmute your microphone during a call.
-- Incoming calls show a dialog with Accept and Decline buttons. Both voice and video calls are supported.
 
 ### Account management
 
@@ -57,7 +58,22 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 - Mute chat notifications temporarily (1 hour, 8 hours, 1 day, 1 week) or permanently.
 - Muted chats are labelled [Muted] in the chat list and produce no notification sounds.
 - Mute and unmute from the Chat menu or the right-click context menu on the chat list.
-- The context menu disables the Unmute option when the chat is not muted.
+- Menu items are automatically enabled or disabled based on the current mute state.
+
+### Block, unblock, and report
+
+- Block a user from the Chat menu or context menu. Blocked users cannot contact you.
+- Unblock a user to allow them to contact you again.
+- Report a user for spam, violence, pornography, child abuse, illegal drugs, personal details shared, fake account, or other reasons, with an optional details field.
+- Block, unblock, and report are only available for user chats (not groups or channels).
+- Block/unblock menu items are automatically enabled or disabled based on the current block state.
+
+### Notifications
+
+- System notifications appear when a new message arrives while Teepee is minimized or hidden in the system tray.
+- Notifications show the sender name, chat type (chat, group, or channel), and a message preview.
+- Notifications respect mute settings and are not shown for muted chats.
+- Toggle this behaviour in Settings under Notifications with "Show notifications when minimized".
 
 ### Group management
 
@@ -72,10 +88,10 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 
 ### Sound packs
 
-Teepee plays notification sounds for sent messages, received messages, group messages, and channel messages. The sounds are organised into packs.
+Teepee plays notification sounds for sent messages, received messages, group messages, incoming and outgoing calls, and channel messages. The sounds are organised into packs.
 
-- The default pack ships in the sounds/default folder with four WAV files: sent.wav, received.wav, group_received.wav, and channel_received.wav.
-- To create a custom sound pack, add a new folder inside sounds/ with the same four filenames. For example, sounds/retro/ with your own WAV files.
+- The default pack ships in the sounds/default folder with eight WAV files: sent.wav, received.wav, group_received.wav, channel_received.wav, call_in.wav, call_out.wav, reply_sent.wav, and reply_received.wav.
+- To create a custom sound pack, add a new folder inside sounds/ with the same eight filenames. For example, sounds/retro/ with your own WAV files.
 - Select your preferred pack from the Settings dialog (Ctrl+,) under Notifications then Sound Pack.
 - Toggle all notification sounds on or off with the "Enable notification sounds" checkbox in the same section.
 
@@ -90,7 +106,7 @@ Teepee plays notification sounds for sent messages, received messages, group mes
 - High contrast mode is detected and respected.
 - Automatic update checking on launch with a manual Check for Updates option in the Help menu.
 - System tray integration: closing the window minimises to tray; a balloon notification confirms.
-- Right-click context menu on the chat list for quick access to mute, unmute, and delete actions.
+- Right-click context menu on the chat list for quick access to mute, unmute, block, unblock, report, and delete actions.
 
 ## Installation
 
@@ -150,7 +166,7 @@ The output is placed in the dist folder.
 
 ## Telegram API credentials
 
-Teepee needs a Telegram API ID and API Hash to connect. If credentials are not already embedded in your own custom build, the app will prompt you to enter them on first launch.
+Teepee needs a Telegram API ID and API Hash to connect. Official Teepee builds already have these, but if credentials are not already embedded in your own custom build, the app will prompt you to enter them on first launch.
 
 To get your own credentials:
 
@@ -181,7 +197,7 @@ uv run python setup_credentials.py
 
 1. Press the Voice button to start recording.
 2. Press the Stop button (the same button) to stop recording and send the voice message.
-3. To play a received voice message or audio file, select it in the message list and press the Play button. Audio plays inline.
+3. To play a received voice message or audio file, select it in the message list and press the Play button. Audio plays in-client.
 4. To play a received video, select it and press the Play button. The video opens in your default media player.
 5. To save a voice message, photo, video, audio file, or document, select the message and press the Save button or use Ctrl+Shift+S. Choose where to save the file in the file picker.
 
@@ -189,7 +205,7 @@ uv run python setup_credentials.py
 
 1. Open a chat.
 2. Press the Attach button, or use Ctrl+Shift+A.
-3. Choose a file from the file picker. The file is sent to the current chat.
+3. Choose a file and add an optional caption that is used as alt text for those who are blind/visually impaired, deaf/hard of hearing etc.
 
 ### Keyboard shortcuts
 
@@ -241,8 +257,11 @@ Press Ctrl+, or open the Settings menu to configure:
 - Audio input and output devices.
 - Camera device for video calls.
 - Notification sounds on or off.
+- Show notifications when minimized on or off.
 - Sound pack selection (see the Sound packs section above for how to create custom packs).
 - Time format: choose between 12-hour (1:30 PM) and 24-hour (13:30) display.
+- Number of chats to load (10 to 500, default 100).
+- Number of messages to load per chat (10 to 500, default 50).
 
 ### Account
 
@@ -258,3 +277,11 @@ Open File then My Account to view and edit your Telegram account. The dialog has
 To mute a chat, select it in the chat list and choose Chat then Mute Chat from the menu bar, or right-click the chat and select Mute Chat. Pick a duration: 1 hour, 8 hours, 1 day, 1 week, or permanently. Muted chats show a [Muted] label in the chat list and will not play notification sounds for incoming messages.
 
 To unmute, select the chat and choose Chat then Unmute Chat, or right-click and select Unmute Chat.
+
+### Blocking and reporting
+
+To block a user, select their chat and choose Chat then Block User, or right-click and select Block User. Blocked users cannot send you messages or calls.
+
+To unblock, choose Chat then Unblock User, or right-click and select Unblock User.
+
+To report a user, choose Chat then Report User. Select a reason from the list and optionally provide additional details. These options are only available for one-on-one user chats.

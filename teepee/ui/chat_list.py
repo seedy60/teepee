@@ -69,6 +69,12 @@ class ChatListPanel(wx.Panel):
         if msg:
             if msg.voice:
                 preview = ": Voice message"
+            elif msg.media and msg.text:
+                label = self._media_label(msg.media)
+                caption = msg.text.replace("\n", " ")
+                if len(caption) > 40:
+                    caption = caption[:40] + "..."
+                preview = f": [{label}] {caption}"
             elif msg.text:
                 text = msg.text.replace("\n", " ")
                 if len(text) > 40:
@@ -84,20 +90,33 @@ class ChatListPanel(wx.Panel):
         if type_name == "MessageMediaDocument":
             doc = getattr(media, "document", None)
             if doc:
+                filename = None
+                kind = None
                 for attr in getattr(doc, "attributes", []):
                     attr_name = type(attr).__name__
-                    if attr_name == "DocumentAttributeAudio":
+                    if attr_name == "DocumentAttributeFilename":
+                        filename = getattr(attr, "file_name", None)
+                    elif attr_name == "DocumentAttributeAudio":
                         if getattr(attr, "voice", False):
                             return "Voice message"
-                        return "Audio"
-                    if attr_name == "DocumentAttributeVideo":
+                        kind = "Audio"
+                    elif attr_name == "DocumentAttributeVideo":
                         if getattr(attr, "round_message", False):
                             return "Video message"
-                        return "Video"
-                    if attr_name == "DocumentAttributeSticker":
+                        kind = "Video"
+                    elif attr_name == "DocumentAttributeSticker":
                         return "Sticker"
-                    if attr_name == "DocumentAttributeAnimated":
+                    elif attr_name == "DocumentAttributeAnimated":
                         return "GIF"
+                if kind and filename:
+                    return f"{kind}: {filename}"
+                if kind:
+                    return kind
+                if filename:
+                    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+                    if ext in ("png", "jpg", "jpeg", "bmp", "gif", "webp", "tiff", "tif"):
+                        return f"Picture: {filename}"
+                    return f"File: {filename}"
             return "Document"
         labels = {
             "MessageMediaPhoto": "Photo",
@@ -197,12 +216,33 @@ class ChatListPanel(wx.Panel):
         unmute_item = menu.Append(wx.ID_ANY, "&Unmute Chat")
         if idx < len(self._filtered_dialogs):
             chat_id = getattr(self._filtered_dialogs[idx].entity, "id", None)
-            if chat_id not in self._muted_ids:
-                unmute_item.Enable(False)
+            is_muted = chat_id in self._muted_ids
+            mute_item.Enable(not is_muted)
+            unmute_item.Enable(is_muted)
+        menu.AppendSeparator()
+        block_item = menu.Append(wx.ID_ANY, "&Block User")
+        unblock_item = menu.Append(wx.ID_ANY, "U&nblock User")
+        report_item = menu.Append(wx.ID_ANY, "&Report User...")
+        # Disable block/unblock/report for non-user chats
+        if idx < len(self._filtered_dialogs):
+            from telethon.tl.types import User
+            entity = self._filtered_dialogs[idx].entity
+            if not isinstance(entity, User):
+                block_item.Enable(False)
+                unblock_item.Enable(False)
+                report_item.Enable(False)
+            else:
+                user_id = getattr(entity, "id", None)
+                is_blocked = user_id in self.frame._blocked_users
+                block_item.Enable(not is_blocked)
+                unblock_item.Enable(is_blocked)
         menu.AppendSeparator()
         delete_item = menu.Append(wx.ID_ANY, "&Delete Chat")
         self.Bind(wx.EVT_MENU, self._on_ctx_mute, mute_item)
         self.Bind(wx.EVT_MENU, self._on_ctx_unmute, unmute_item)
+        self.Bind(wx.EVT_MENU, self._on_ctx_block, block_item)
+        self.Bind(wx.EVT_MENU, self._on_ctx_unblock, unblock_item)
+        self.Bind(wx.EVT_MENU, self._on_ctx_report, report_item)
         self.Bind(wx.EVT_MENU, self._on_ctx_delete, delete_item)
         self.PopupMenu(menu)
         menu.Destroy()
@@ -212,6 +252,15 @@ class ChatListPanel(wx.Panel):
 
     def _on_ctx_unmute(self, event):
         self.frame._on_unmute_chat(event)
+
+    def _on_ctx_block(self, event):
+        self.frame._on_block_user(event)
+
+    def _on_ctx_unblock(self, event):
+        self.frame._on_unblock_user(event)
+
+    def _on_ctx_report(self, event):
+        self.frame._on_report_user(event)
 
     def _on_ctx_delete(self, event):
         self.frame.delete_selected_chat()

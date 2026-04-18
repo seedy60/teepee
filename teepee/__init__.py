@@ -1,4 +1,4 @@
 """Teepee - A wxPython Telegram client."""
 
 APP_NAME = "Teepee"
-APP_VERSION = "2516.4.1"
+APP_VERSION = "2516.6"
