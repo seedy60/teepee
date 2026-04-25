@@ -28,7 +28,7 @@ class ChatListPanel(wx.Panel):
             border=5,
         )
         self.search_ctrl = wx.TextCtrl(self)
-        self.search_ctrl.SetName("Search")
+        self.search_ctrl.SetName("Search chats")
         sizer.Add(self.search_ctrl, flag=wx.EXPAND | wx.ALL, border=5)
 
         sizer.Add(

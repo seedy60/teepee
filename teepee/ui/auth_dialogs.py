@@ -201,3 +201,218 @@ class TwoFactorDialog(wx.Dialog):
 
     def GetPassword(self):
         return self.password_ctrl.GetValue()
+
+
+class CreateGroupDialog(wx.Dialog):
+    def __init__(self, parent):
+        super().__init__(
+            parent,
+            title="Create Group",
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
+        )
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        sizer.Add(
+            wx.StaticText(self, label="Group title:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.title_ctrl = wx.TextCtrl(self)
+        self.title_ctrl.SetName("Group title")
+        sizer.Add(
+            self.title_ctrl,
+            flag=wx.EXPAND | wx.LEFT | wx.RIGHT,
+            border=10,
+        )
+
+        sizer.Add(
+            wx.StaticText(self, label="Visibility:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.private_radio = wx.RadioButton(
+            self,
+            label="&Private group",
+            style=wx.RB_GROUP,
+        )
+        self.public_radio = wx.RadioButton(self, label="P&ublic group")
+        self.private_radio.SetValue(True)
+        sizer.Add(
+            self.private_radio,
+            flag=wx.LEFT | wx.RIGHT | wx.TOP,
+            border=10,
+        )
+        sizer.Add(
+            self.public_radio,
+            flag=wx.LEFT | wx.RIGHT | wx.TOP,
+            border=10,
+        )
+
+        sizer.Add(
+            wx.StaticText(self, label="Public username (required for public):"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.public_username_ctrl = wx.TextCtrl(self)
+        self.public_username_ctrl.SetName("Public username")
+        self.public_username_ctrl.Enable(False)
+        sizer.Add(
+            self.public_username_ctrl,
+            flag=wx.EXPAND | wx.LEFT | wx.RIGHT,
+            border=10,
+        )
+
+        sizer.Add(
+            wx.StaticText(
+                self,
+                label="Invite usernames (comma-separated, optional):",
+            ),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.usernames_ctrl = wx.TextCtrl(self)
+        self.usernames_ctrl.SetName("Invite usernames")
+        sizer.Add(
+            self.usernames_ctrl,
+            flag=wx.EXPAND | wx.LEFT | wx.RIGHT,
+            border=10,
+        )
+
+        btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        self.private_radio.Bind(wx.EVT_RADIOBUTTON, self._on_visibility_changed)
+        self.public_radio.Bind(wx.EVT_RADIOBUTTON, self._on_visibility_changed)
+
+        self.SetSizerAndFit(sizer)
+        self.SetMinSize((430, -1))
+        self.CenterOnParent()
+        self.title_ctrl.SetFocus()
+        apply_theme(self)
+
+    def _on_visibility_changed(self, event):
+        is_public = self.public_radio.GetValue()
+        self.public_username_ctrl.Enable(is_public)
+        if is_public:
+            self.public_username_ctrl.SetFocus()
+        else:
+            self.public_username_ctrl.SetValue("")
+
+    def GetTitle(self):
+        return self.title_ctrl.GetValue().strip()
+
+    def IsPublic(self):
+        return self.public_radio.GetValue()
+
+    def GetPublicUsername(self):
+        return self.public_username_ctrl.GetValue().strip().lstrip("@")
+
+    def GetInviteUsernames(self):
+        return self.usernames_ctrl.GetValue().strip()
+
+
+class CreateChannelDialog(wx.Dialog):
+    def __init__(self, parent):
+        super().__init__(
+            parent,
+            title="Create Channel",
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
+        )
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        sizer.Add(
+            wx.StaticText(self, label="Channel title:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.title_ctrl = wx.TextCtrl(self)
+        self.title_ctrl.SetName("Channel title")
+        sizer.Add(
+            self.title_ctrl,
+            flag=wx.EXPAND | wx.LEFT | wx.RIGHT,
+            border=10,
+        )
+
+        sizer.Add(
+            wx.StaticText(self, label="Description (optional):"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.about_ctrl = wx.TextCtrl(self)
+        self.about_ctrl.SetName("Channel description")
+        sizer.Add(
+            self.about_ctrl,
+            flag=wx.EXPAND | wx.LEFT | wx.RIGHT,
+            border=10,
+        )
+
+        sizer.Add(
+            wx.StaticText(self, label="Visibility:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.private_radio = wx.RadioButton(
+            self,
+            label="&Private channel",
+            style=wx.RB_GROUP,
+        )
+        self.public_radio = wx.RadioButton(self, label="P&ublic channel")
+        self.private_radio.SetValue(True)
+        sizer.Add(
+            self.private_radio,
+            flag=wx.LEFT | wx.RIGHT | wx.TOP,
+            border=10,
+        )
+        sizer.Add(
+            self.public_radio,
+            flag=wx.LEFT | wx.RIGHT | wx.TOP,
+            border=10,
+        )
+
+        sizer.Add(
+            wx.StaticText(self, label="Public username (required for public):"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.public_username_ctrl = wx.TextCtrl(self)
+        self.public_username_ctrl.SetName("Public username")
+        self.public_username_ctrl.Enable(False)
+        sizer.Add(
+            self.public_username_ctrl,
+            flag=wx.EXPAND | wx.LEFT | wx.RIGHT,
+            border=10,
+        )
+
+        btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        self.private_radio.Bind(wx.EVT_RADIOBUTTON, self._on_visibility_changed)
+        self.public_radio.Bind(wx.EVT_RADIOBUTTON, self._on_visibility_changed)
+
+        self.SetSizerAndFit(sizer)
+        self.SetMinSize((430, -1))
+        self.CenterOnParent()
+        self.title_ctrl.SetFocus()
+        apply_theme(self)
+
+    def _on_visibility_changed(self, event):
+        is_public = self.public_radio.GetValue()
+        self.public_username_ctrl.Enable(is_public)
+        if is_public:
+            self.public_username_ctrl.SetFocus()
+        else:
+            self.public_username_ctrl.SetValue("")
+
+    def GetTitle(self):
+        return self.title_ctrl.GetValue().strip()
+
+    def GetAbout(self):
+        return self.about_ctrl.GetValue().strip()
+
+    def IsPublic(self):
+        return self.public_radio.GetValue()
+
+    def GetPublicUsername(self):
+        return self.public_username_ctrl.GetValue().strip().lstrip("@")

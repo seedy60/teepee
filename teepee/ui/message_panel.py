@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 import wx
 
 from .theme import apply_theme, is_dark_mode
@@ -24,6 +26,7 @@ class MessagePanel(wx.Panel):
         self._chat_open = False
         self._markup_buttons = []
         self._reply_to_msg = None
+        self._read_outbox_max_id = 0
 
         sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -130,6 +133,13 @@ class MessagePanel(wx.Panel):
         self.attach_btn.SetToolTip("Send a file")
         btn_sizer.Add(self.attach_btn, 0, wx.ALL, 2)
 
+        self.sticker_btn = wx.Button(self, label="Stic&ker")
+        self.sticker_btn.SetName("Sticker")
+        self.sticker_btn.SetToolTip(
+            "Send a sticker by searching with text or an emoji"
+        )
+        btn_sizer.Add(self.sticker_btn, 0, wx.ALL, 2)
+
         self.voice_btn = wx.Button(self, label="&Voice")
         self.voice_btn.SetName("Voice")
         self.voice_btn.SetToolTip("Record a voice message")
@@ -144,6 +154,7 @@ class MessagePanel(wx.Panel):
 
         self.send_btn.Bind(wx.EVT_BUTTON, self._on_send)
         self.attach_btn.Bind(wx.EVT_BUTTON, self._on_attach)
+        self.sticker_btn.Bind(wx.EVT_BUTTON, self._on_sticker)
         self.voice_btn.Bind(wx.EVT_BUTTON, self._on_voice)
         self.play_btn.Bind(wx.EVT_BUTTON, self._on_play)
         self.stop_btn.Bind(wx.EVT_BUTTON, self._on_stop)
@@ -169,8 +180,9 @@ class MessagePanel(wx.Panel):
     def _on_message_selected(self, event):
         self.frame.on_message_selected()
 
-    def display_messages(self, messages):
+    def display_messages(self, messages, read_outbox_max_id=0):
         self._show_chat()
+        self._read_outbox_max_id = read_outbox_max_id
         self.messages_list.Freeze()
         self.messages_list.Clear()
         for msg in reversed(messages):
@@ -194,13 +206,32 @@ class MessagePanel(wx.Panel):
         tf = self.frame.config.get("time_format", "24h")
         return "%I:%M %p" if tf == "12h" else "%H:%M"
 
+    @staticmethod
+    def _ordinal_suffix(day):
+        if 11 <= day % 100 <= 13:
+            return "th"
+        return {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+
+    def _format_message_time(self, dt):
+        if not dt:
+            return ""
+        local_dt = dt.astimezone()
+        now = datetime.now(local_dt.tzinfo)
+        time_str = local_dt.strftime(self._get_time_format())
+        if now >= local_dt and now - local_dt > timedelta(hours=24):
+            suffix = self._ordinal_suffix(local_dt.day)
+            weekday = local_dt.strftime("%A")
+            month = local_dt.strftime("%B")
+            return f"{weekday}, {month} {local_dt.day}{suffix}, {local_dt.year} at {time_str}"
+        return time_str
+
     def _format_message_obj(self, msg):
         if msg.out:
             sender = "You"
         else:
             sender = self._display_name(msg.sender)
 
-        time_str = msg.date.astimezone().strftime(self._get_time_format()) if msg.date else ""
+        time_str = self._format_message_time(msg.date)
 
         reply_prefix = ""
         if msg.reply_to:
@@ -209,6 +240,14 @@ class MessagePanel(wx.Panel):
         edited_suffix = ""
         if getattr(msg, "edit_date", None):
             edited_suffix = " (edited)"
+
+        # Read status for outgoing messages
+        status_suffix = ""
+        if msg.out:
+            if self._read_outbox_max_id and msg.id <= self._read_outbox_max_id:
+                status_suffix = ". Seen"
+            else:
+                status_suffix = ". Sent"
 
         if msg.voice:
             text = "[Voice message]"
@@ -225,7 +264,7 @@ class MessagePanel(wx.Panel):
         else:
             text = "[Empty message]"
 
-        return f"[{time_str}] {sender}: {reply_prefix}{text}{edited_suffix}"
+        return f"{reply_prefix}{text}{edited_suffix}, {sender} at {time_str}{status_suffix}"
 
     @staticmethod
     def _action_label(action):
@@ -298,7 +337,7 @@ class MessagePanel(wx.Panel):
     def append_new_message(self, data):
         self._show_chat()
         sender = data["sender_name"]
-        time_str = data["date"].astimezone().strftime(self._get_time_format()) if data["date"] else ""
+        time_str = self._format_message_time(data["date"])
 
         reply_prefix = ""
         if data.get("reply_to_msg_id"):
@@ -331,8 +370,11 @@ class MessagePanel(wx.Panel):
         sel = self.messages_list.GetSelection()
         was_at_end = (count == 0 or sel == wx.NOT_FOUND or sel >= count - 1)
 
+        # Outgoing messages just sent are always "Sent" initially
+        status_suffix = ". Sent" if data.get("out") else ""
+
         self.messages_list.Append(
-            f"[{time_str}] {sender}: {reply_prefix}{text}"
+            f"{reply_prefix}{text}, {sender} at {time_str}{status_suffix}"
         )
 
         if was_at_end:
@@ -380,6 +422,9 @@ class MessagePanel(wx.Panel):
                     reply_to = self._reply_to_msg.id
                 self.clear_reply()
                 self.frame.send_file(path, reply_to=reply_to, caption=caption)
+
+    def _on_sticker(self, event):
+        self.frame.send_sticker_dialog()
 
     def _on_voice(self, event):
         if not self._recording:
@@ -506,6 +551,7 @@ class MessagePanel(wx.Panel):
         self.input_ctrl.Enable(enabled)
         self.send_btn.Enable(enabled)
         self.attach_btn.Enable(enabled)
+        self.sticker_btn.Enable(enabled)
         self.voice_btn.Enable(enabled)
         self.save_btn.Enable(enabled)
         self.delete_msg_btn.Enable(enabled)

@@ -400,6 +400,16 @@ class CallManager:
         self._camera_feeder.stop()
         self._video_active = False
 
+    async def _reapply_playback(self, user_id):
+        """Re-apply PLAYBACK stream sources after connection is established."""
+        try:
+            await self._ntg.set_stream_sources(
+                user_id, StreamMode.PLAYBACK, self._audio_playback_desc(),
+            )
+            log.debug("PLAYBACK stream re-applied after CONNECTED")
+        except Exception as e:
+            log.debug("Playback re-apply: %s", e)
+
     # ----------------------------------------------------------
     # Signaling bridge
     # ----------------------------------------------------------
@@ -450,6 +460,11 @@ class CallManager:
         log.info("NTgCalls connection change: user=%s state=%s", user_id, state_name)
         if network_info.state == ConnectionState.CONNECTED:
             self._call_start_time = time.monotonic()
+            # Re-apply PLAYBACK to ensure speaker is properly acquired
+            # (the outgoing ringtone may have held the device during initial setup)
+            asyncio.run_coroutine_threadsafe(
+                self._reapply_playback(user_id), self.tg._loop,
+            )
             if self.on_call_state_changed:
                 wx.CallAfter(self.on_call_state_changed, "active", None)
         elif network_info.state == ConnectionState.CLOSED:
@@ -726,10 +741,9 @@ class CallManager:
                 self._video_active = True
                 self._start_camera_feeder(user_id)
 
-            self._call_start_time = time.monotonic()
-            log.info("P2P audio connection established for outgoing call")
+            log.info("P2P connect dispatched for outgoing call, waiting for CONNECTED...")
             if self.on_call_state_changed:
-                wx.CallAfter(self.on_call_state_changed, "active", None)
+                wx.CallAfter(self.on_call_state_changed, "connecting", None)
             return result
 
         except asyncio.TimeoutError:

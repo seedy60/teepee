@@ -11,6 +11,7 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 ### Messaging
 
 - Send and receive text messages, voice messages, files, and media.
+- Send stickers using the Sticker button by searching with text (for example, smile, cat) or emoji.
 - Messages open in a separate window when you select a chat, keeping the chat list always visible.
 - Browse your chat list with a live search filter.
 - Reply to, edit, delete, and manage messages with keyboard shortcuts.
@@ -27,11 +28,12 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 - Unread message counts are shown in the chat list and cleared automatically when you open a chat.
 - Message timestamps are displayed in your local timezone.
 - Choose between 12-hour and 24-hour time format in Settings.
+- For messages older than 24 hours, timestamps include the full date (for example, Friday, April 17th, 2026 at 13:30).
+- Outgoing messages show delivery state as Sent or Seen.
 - Configure how many chats and messages to load in Settings under Display.
-- Message edits from other users are reflected in real time in both the message list and chat preview.
 - Click the Open Link button to open URLs contained in a message. If a message contains multiple URLs, a list lets you choose which one to open.
 
-### Files browser
+### File browser
 
 - Groups and channels have a Files tab that lists all shared documents.
 - Search files by name with server-side search.
@@ -77,12 +79,18 @@ Teepee is a lightweight desktop Telegram client designed with blind and visually
 
 ### Group management
 
+- Create groups and channels as private or public.
+- Public groups and channels support setting a public username during creation.
 - Create a new group and optionally invite members at creation time.
 - Create a new channel with an optional description.
 - Invite a user to the currently selected group or channel by username.
 - Join a group or channel by username or invite link.
+- Generate and copy an invite link for the selected group or channel.
 - Leave the currently selected group or channel.
-- View the member list.
+- View the member list with role information (Owner, Admin, Member).
+- Promote members to admin or remove admin role from the member list dialog.
+- Change per-member send permissions from the member list dialog in channels and supergroups.
+- Kick members directly from the member list dialog.
 - Kick a member by username.
 - Edit the group title.
 
@@ -101,6 +109,7 @@ Teepee plays notification sounds for sent messages, received messages, group mes
 - Keyboard-friendly navigation with Tab, arrow keys, and area shortcuts (Ctrl+1 for chat list, Ctrl+2 for messages, Ctrl+3 for message input, Ctrl+4 for files list, Ctrl+5 for file search).
 - Focus is managed throughout the app: after closing dialogs, deleting messages, switching chats, and restoring from the system tray, focus returns to a logical target.
 - Status messages are mirrored to both the main window and message window, so screen reader users always get feedback regardless of which window has focus.
+- Screen reader announcements use Prism and can be configured in Settings (enable or disable, backend selection, and voice selection when supported by the chosen backend).
 - A Keyboard Shortcuts reference is available from the Help menu or by pressing F1.
 - Dark mode detected automatically with a matching dark theme applied, including dark title bars on Windows.
 - High contrast mode is detected and respected.
@@ -156,10 +165,18 @@ uv run python run.py
 
 ## Compiling
 
-Run the build script to generate the Windows executable and a zip archive ready for distribution.
+Use one of the following build scripts to generate the Windows executable and a zip archive ready for distribution.
+
+- Windowed build (no console window):
 
 ```
 uv run python build.py
+```
+
+- Console build (recommended for debugging, shows tracebacks and runtime errors):
+
+```
+uv run python build2.py
 ```
 
 The output is placed in the dist folder.
@@ -241,14 +258,22 @@ The following table lists all keyboard shortcuts grouped by category.
 
 From the Group menu you can:
 
-- Create a new group. You will be prompted for a name and optionally a comma-separated list of usernames to invite.
-- Create a new channel. You will be prompted for a name and an optional description.
+- Create a new group. You will be prompted for a name, private or public visibility, a public username for public groups, and optionally a comma-separated list of usernames to invite.
+- Create a new channel. You will be prompted for a name, optional description, private or public visibility, and a public username for public channels.
 - Invite a user to the currently selected group or channel by entering their username.
 - Join a group or channel by username or invite link.
+- Generate an invite link for the currently selected group or channel and copy it to the clipboard.
 - Leave the currently selected group or channel.
-- View the member list.
+- View the member list, including role labels.
+- Change member role (member or admin) directly from the member list dialog.
+- Change member permissions directly from the member list dialog in channels and supergroups.
+- Kick members directly from the member list dialog.
 - Kick a member by username.
 - Edit the group title.
+
+Notes:
+- Telegram public usernames must be available and not collectible usernames.
+- Per-member permission editing is available for channels and supergroups. Basic groups do not expose the same granular permission model.
 
 ### Settings
 
@@ -257,6 +282,9 @@ Press Ctrl+, or open the Settings menu to configure:
 - Audio input and output devices.
 - Camera device for video calls.
 - Notification sounds on or off.
+- Screen reader announcements on or off (off by default).
+- Announcement backend selection: automatic best backend or a specific backend.
+- Announcement voice selection for the selected backend, when voice selection is supported.
 - Show notifications when minimized on or off.
 - Sound pack selection (see the Sound packs section above for how to create custom packs).
 - Time format: choose between 12-hour (1:30 PM) and 24-hour (13:30) display.

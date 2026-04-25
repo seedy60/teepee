@@ -1,6 +1,7 @@
 import threading
 import wx
 
+from .announce import list_announcement_backends, list_announcement_voices
 from .theme import apply_theme
 
 
@@ -109,6 +110,69 @@ class SettingsDialog(wx.Dialog):
         self.sounds_enabled.SetValue(config.get("sounds_enabled", True))
         sounds_box.Add(self.sounds_enabled, flag=wx.ALL, border=5)
 
+        self.announcements_enabled = wx.CheckBox(
+            self, label="Enable screen reader announcements"
+        )
+        self.announcements_enabled.SetName("Enable screen reader announcements")
+        self.announcements_enabled.SetToolTip(
+            "Enable spoken status and message updates for screen reader users"
+        )
+        self.announcements_enabled.SetValue(
+            config.get("announcements_enabled", False)
+        )
+        sounds_box.Add(self.announcements_enabled, flag=wx.ALL, border=5)
+
+        sounds_box.Add(
+            wx.StaticText(self, label="Announcement backend:"),
+            flag=wx.LEFT | wx.TOP,
+            border=5,
+        )
+        self._announcement_backends = list_announcement_backends()
+        backend_choices = ["Automatic (best available)"]
+        for b in self._announcement_backends:
+            backend_choices.append(f"{b['name']} ({b['id']})")
+        self.announcement_backend_choice = wx.Choice(self, choices=backend_choices)
+        self.announcement_backend_choice.SetName("Announcement backend")
+        self.announcement_backend_choice.SetToolTip(
+            "Choose automatic backend selection or a specific Prism backend"
+        )
+        saved_backend = (config.get("announcement_backend", "auto") or "auto").strip()
+        if saved_backend and saved_backend.lower() != "auto":
+            backend_idx = 0
+            for i, b in enumerate(self._announcement_backends, start=1):
+                if b["id"].lower() == saved_backend.lower():
+                    backend_idx = i
+                    break
+            self.announcement_backend_choice.SetSelection(backend_idx)
+        else:
+            self.announcement_backend_choice.SetSelection(0)
+        sounds_box.Add(
+            self.announcement_backend_choice, flag=wx.EXPAND | wx.ALL, border=5
+        )
+
+        sounds_box.Add(
+            wx.StaticText(self, label="Announcement voice:"),
+            flag=wx.LEFT | wx.TOP,
+            border=5,
+        )
+        self.announcement_voice_choice = wx.Choice(self)
+        self.announcement_voice_choice.SetName("Announcement voice")
+        self.announcement_voice_choice.SetToolTip(
+            "Choose a specific voice when supported by the selected backend"
+        )
+        self._announcement_voice_indices = [-1]
+        self._load_announcement_voices(config.get("announcement_voice_index", -1))
+        sounds_box.Add(
+            self.announcement_voice_choice, flag=wx.EXPAND | wx.ALL, border=5
+        )
+        self.announcements_enabled.Bind(
+            wx.EVT_CHECKBOX, self._on_announcements_enabled_changed
+        )
+        self.announcement_backend_choice.Bind(
+            wx.EVT_CHOICE, self._on_announcement_backend_changed
+        )
+        self._sync_announcement_controls()
+
         self.notify_minimized = wx.CheckBox(
             self, label="Show notifications when minimized"
         )
@@ -216,6 +280,25 @@ class SettingsDialog(wx.Dialog):
     def GetSoundsEnabled(self):
         return self.sounds_enabled.GetValue()
 
+    def GetAnnouncementsEnabled(self):
+        return self.announcements_enabled.GetValue()
+
+    def GetAnnouncementBackend(self):
+        idx = self.announcement_backend_choice.GetSelection()
+        if idx <= 0:
+            return "auto"
+        if 1 <= idx <= len(self._announcement_backends):
+            return self._announcement_backends[idx - 1]["id"]
+        return "auto"
+
+    def GetAnnouncementVoiceIndex(self):
+        idx = self.announcement_voice_choice.GetSelection()
+        if idx == wx.NOT_FOUND:
+            return -1
+        if 0 <= idx < len(self._announcement_voice_indices):
+            return self._announcement_voice_indices[idx]
+        return -1
+
     def GetSoundPack(self):
         idx = self.sound_pack_choice.GetSelection()
         if idx != wx.NOT_FOUND:
@@ -241,7 +324,7 @@ class SettingsDialog(wx.Dialog):
         stream = self.sound_manager.play_test_tone()
         if stream:
             self.test_speaker_btn.SetLabel("Playing...")
-            self.test_speaker_btn.SetName("Playing")
+            self.test_speaker_btn.SetName("Speaker test playing")
             self.test_speaker_btn.SetToolTip("Playing test tone")
             self.test_speaker_btn.Disable()
             announce("Playing test tone")
@@ -307,7 +390,7 @@ class SettingsDialog(wx.Dialog):
             stream = self.sound_manager.stop_recording_and_play(rec)
             if stream:
                 self.test_mic_btn.SetLabel("Playing back...")
-                self.test_mic_btn.SetName("Playing back")
+                self.test_mic_btn.SetName("Microphone playback")
                 self.test_mic_btn.SetToolTip("Playing back microphone recording")
                 self.test_mic_btn.Disable()
                 announce("Playing back recording")
@@ -328,3 +411,42 @@ class SettingsDialog(wx.Dialog):
             self.test_mic_btn.Enable()
             self.test_mic_btn.SetFocus()
             announce("Microphone test complete")
+
+    def _selected_announcement_backend_id(self):
+        idx = self.announcement_backend_choice.GetSelection()
+        if idx <= 0:
+            return ""
+        if 1 <= idx <= len(self._announcement_backends):
+            return self._announcement_backends[idx - 1]["id"]
+        return ""
+
+    def _load_announcement_voices(self, selected_voice=-1):
+        backend_id = self._selected_announcement_backend_id()
+        voices = list_announcement_voices(backend_id)
+        choices = ["Automatic (default voice)"]
+        indices = [-1]
+        sel = 0
+        for i, voice in enumerate(voices, start=1):
+            lang = voice.get("language", "")
+            label = voice.get("name", f"Voice {voice.get('index', i - 1)}")
+            if lang:
+                label = f"{label} [{lang}]"
+            choices.append(label)
+            voice_index = int(voice.get("index", i - 1))
+            indices.append(voice_index)
+            if voice_index == selected_voice:
+                sel = i
+        self._announcement_voice_indices = indices
+        self.announcement_voice_choice.SetItems(choices)
+        self.announcement_voice_choice.SetSelection(sel)
+
+    def _on_announcement_backend_changed(self, event):
+        self._load_announcement_voices(-1)
+
+    def _sync_announcement_controls(self):
+        enabled = self.announcements_enabled.GetValue()
+        self.announcement_backend_choice.Enable(enabled)
+        self.announcement_voice_choice.Enable(enabled)
+
+    def _on_announcements_enabled_changed(self, event):
+        self._sync_announcement_controls()

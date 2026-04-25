@@ -361,6 +361,11 @@ class AccountDialog(wx.Dialog):
         self.terminate_btn.Bind(
             wx.EVT_BUTTON, self._on_terminate_session
         )
+        self.sessions_list.Bind(wx.EVT_LISTBOX, self._on_session_selected)
+
+        if self.sessions_list.GetCount() > 0:
+            self.sessions_list.SetSelection(0)
+        self._sync_session_controls()
 
         panel.SetSizer(sizer)
         self.notebook.AddPage(panel, "Security")
@@ -496,6 +501,22 @@ class AccountDialog(wx.Dialog):
             self.sessions_list.SetFocus()
         else:
             self.terminate_btn.SetFocus()
+        self._sync_session_controls()
+
+    def _on_session_selected(self, event):
+        self._sync_session_controls()
+        event.Skip()
+
+    def _sync_session_controls(self):
+        idx = self.sessions_list.GetSelection()
+        if idx == wx.NOT_FOUND or idx >= len(self._sessions):
+            self.terminate_btn.Enable(False)
+            return
+
+        session = self._sessions[idx]
+        # Current session cannot be terminated remotely.
+        can_terminate = not bool(session.get("current"))
+        self.terminate_btn.Enable(can_terminate)
 
     def GetFirstName(self):
         return self.first_name_ctrl.GetValue().strip()

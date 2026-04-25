@@ -10,6 +10,8 @@ from telethon.errors import SessionPasswordNeededError
 from .auth_dialogs import (
     APISetupDialog,
     CodeDialog,
+    CreateChannelDialog,
+    CreateGroupDialog,
     NewChatDialog,
     PhoneDialog,
     TwoFactorDialog,
@@ -17,7 +19,11 @@ from .auth_dialogs import (
 from .chat_list import ChatListPanel
 from .message_frame import MessageFrame
 from .settings_dialog import SettingsDialog
-from .announce import announce
+from .announce import (
+    announce,
+    set_announcements_enabled,
+    set_announcement_preferences,
+)
 
 log = logging.getLogger(__name__)
 
@@ -171,13 +177,73 @@ class InCallDialog(wx.Dialog):
         self.Destroy()
 
 
+class MemberPermissionsDialog(wx.Dialog):
+    def __init__(self, parent, member_name):
+        super().__init__(
+            parent,
+            title=f"Permissions - {member_name}",
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(
+            wx.StaticText(self, label="Allowed actions for this member:"),
+            flag=wx.ALL,
+            border=10,
+        )
+
+        self.send_messages = wx.CheckBox(self, label="Send &messages")
+        self.send_media = wx.CheckBox(self, label="Send &media")
+        self.send_stickers = wx.CheckBox(self, label="Send s&tickers")
+        self.send_polls = wx.CheckBox(self, label="Send &polls")
+        self.change_info = wx.CheckBox(self, label="Change group &info")
+        self.invite_users = wx.CheckBox(self, label="&Invite users")
+        self.pin_messages = wx.CheckBox(self, label="&Pin messages")
+
+        for checkbox in (
+            self.send_messages,
+            self.send_media,
+            self.send_stickers,
+            self.send_polls,
+            self.change_info,
+            self.invite_users,
+            self.pin_messages,
+        ):
+            checkbox.SetValue(True)
+            sizer.Add(checkbox, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=10)
+
+        btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        self.SetSizerAndFit(sizer)
+        self.CenterOnParent()
+        self.send_messages.SetFocus()
+
+        from .theme import apply_theme
+
+        apply_theme(self)
+
+    def GetPermissions(self):
+        return {
+            "send_messages": self.send_messages.GetValue(),
+            "send_media": self.send_media.GetValue(),
+            "send_stickers": self.send_stickers.GetValue(),
+            "send_polls": self.send_polls.GetValue(),
+            "change_info": self.change_info.GetValue(),
+            "invite_users": self.invite_users.GetValue(),
+            "pin_messages": self.pin_messages.GetValue(),
+        }
+
+
 def _make_tray_icon():
     """Create a simple 16x16 tray icon with a 'T' on a blue background."""
     bmp = wx.Bitmap(16, 16)
     dc = wx.MemoryDC(bmp)
-    dc.SetBackground(wx.Brush(wx.Colour(70, 130, 180)))
+    bg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT)
+    fg = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHTTEXT)
+    dc.SetBackground(wx.Brush(bg))
     dc.Clear()
-    dc.SetTextForeground(wx.WHITE)
+    dc.SetTextForeground(fg)
     dc.SetFont(
         wx.Font(11, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
     )
@@ -232,6 +298,7 @@ class MainFrame(wx.Frame):
 
         self._current_entity = None
         self._current_messages = []
+        self._read_outbox_max_id = 0
         self._dialogs = []
         self._shown_msg_ids = set()
         self._muted_chats = {}
@@ -256,9 +323,18 @@ class MainFrame(wx.Frame):
         self.tg.on_new_message = self._on_incoming_message
         self.tg.on_message_sent = self._on_message_sent
         self.tg.on_message_edited = self._on_remote_message_edited
+        self.tg.on_message_read = self._on_outbox_read
         self.tg.on_incoming_call = self._on_incoming_call
 
         self.calls.on_call_state_changed = self._on_call_state
+
+        set_announcements_enabled(self.config.get("announcements_enabled", False))
+        backend_pref = self.config.get("announcement_backend", "auto")
+        set_announcement_preferences(
+            auto_best=(not backend_pref or str(backend_pref).lower() == "auto"),
+            backend_name="" if not backend_pref else str(backend_pref),
+            voice_index=self.config.get("announcement_voice_index", -1),
+        )
 
         self._restore_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self._on_restore_timer, self._restore_timer)
@@ -373,6 +449,12 @@ class MainFrame(wx.Frame):
             "&Leave Group/Channel",
             "Leave the currently selected group or channel",
         )
+        self._invite_link_id = wx.NewIdRef()
+        group_menu.Append(
+            self._invite_link_id,
+            "Generate Invite &Link",
+            "Create and copy an invite link for the selected group or channel",
+        )
         group_menu.AppendSeparator()
         self._invite_id = wx.NewIdRef()
         group_menu.Append(
@@ -445,6 +527,7 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self._on_check_updates, id=self._update_id)
         self.Bind(wx.EVT_MENU, self._on_join_group, id=self._join_id)
         self.Bind(wx.EVT_MENU, self._on_leave_group, id=self._leave_id)
+        self.Bind(wx.EVT_MENU, self._on_generate_invite_link, id=self._invite_link_id)
         self.Bind(wx.EVT_MENU, self._on_create_group, id=self._create_group_id)
         self.Bind(wx.EVT_MENU, self._on_create_channel, id=self._create_channel_id)
         self.Bind(wx.EVT_MENU, self._on_invite_user, id=self._invite_id)
@@ -859,10 +942,16 @@ class MainFrame(wx.Frame):
             )
             log.info("Loaded %d messages", len(messages))
             try:
+                read_outbox_max_id = self.tg.submit_wait(
+                    self.tg.get_read_outbox_max_id(entity)
+                )
+            except Exception:
+                read_outbox_max_id = 0
+            try:
                 self.tg.submit_wait(self.tg.mark_as_read(entity))
             except Exception:
                 pass
-            wx.CallAfter(self._on_messages_loaded, list(messages), entity)
+            wx.CallAfter(self._on_messages_loaded, list(messages), entity, read_outbox_max_id)
         except Exception as e:
             log.error("Failed to load messages: %s", e, exc_info=True)
             self._pending_chat_focus = False
@@ -870,13 +959,14 @@ class MainFrame(wx.Frame):
             wx.CallAfter(self._msg_frame.SetStatusText, f"Failed to load messages: {e}")
             wx.CallAfter(announce, f"Failed to load messages: {e}")
 
-    def _on_messages_loaded(self, messages, entity):
+    def _on_messages_loaded(self, messages, entity, read_outbox_max_id=0):
         if entity != self._current_entity:
             log.warning("Entity mismatch in _on_messages_loaded, ignoring")
             return
         log.info("Displaying %d messages", len(messages))
         self._current_messages = messages
-        self.message_panel.display_messages(messages)
+        self._read_outbox_max_id = read_outbox_max_id
+        self.message_panel.display_messages(messages, read_outbox_max_id)
         # Show inline buttons for the last message if it has markup
         if messages:
             self.message_panel.update_inline_buttons(messages[0])
@@ -1011,7 +1101,8 @@ class MainFrame(wx.Frame):
                     self.tg.get_messages(entity, limit=self.config.get("message_limit", 50))
                 )
                 wx.CallAfter(
-                    self._on_messages_loaded, list(messages), entity
+                    self._on_messages_loaded, list(messages), entity,
+                    self._read_outbox_max_id,
                 )
         except Exception as e:
             log.error("Inline button click failed: %s", e)
@@ -1106,6 +1197,178 @@ class MainFrame(wx.Frame):
             wx.CallAfter(
                 self._show_error,
                 f"Failed to send file:\n{e}",
+            )
+            wx.CallAfter(self.SetStatusText, "Ready")
+            wx.CallAfter(self._msg_frame.SetStatusText, "Ready")
+
+    # ---------------------------------------------------------- Stickers
+
+    def send_sticker_dialog(self):
+        if not self._current_entity:
+            return
+        from .theme import apply_theme
+
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        dlg = wx.Dialog(
+            parent,
+            title="Send Sticker",
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
+        )
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        sizer.Add(
+            wx.StaticText(
+                dlg,
+                label="Search by text (e.g. smile, cat, love) or paste an emoji:",
+            ),
+            flag=wx.ALL,
+            border=10,
+        )
+        emoji_ctrl = wx.TextCtrl(dlg, style=wx.TE_PROCESS_ENTER)
+        emoji_ctrl.SetName("Search query")
+        emoji_ctrl.SetToolTip(
+            "Type words like smile or cat, or paste an emoji"
+        )
+        sizer.Add(emoji_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+
+        search_btn = wx.Button(dlg, label="&Search")
+        search_btn.SetName("Search stickers")
+        search_btn.SetToolTip(
+            "Search sticker sets by name, or find stickers for a specific emoji"
+        )
+        sizer.Add(search_btn, flag=wx.LEFT | wx.TOP, border=10)
+
+        sizer.Add(
+            wx.StaticText(dlg, label="Results:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        results_list = wx.ListBox(dlg, style=wx.LB_SINGLE)
+        results_list.SetName("Sticker results")
+        sizer.Add(results_list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        btn_sizer = dlg.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        dlg.SetSizerAndFit(sizer)
+        dlg.SetMinSize((400, 350))
+        dlg.CenterOnParent()
+        emoji_ctrl.SetFocus()
+        apply_theme(dlg)
+
+        sticker_docs = []
+
+        def _on_search(event):
+            emoji = emoji_ctrl.GetValue().strip()
+            if not emoji:
+                announce("Enter text or an emoji to search stickers")
+                self.SetStatusText("Enter text or an emoji to search stickers")
+                self._msg_frame.SetStatusText(
+                    "Enter text or an emoji to search stickers"
+                )
+                wx.MessageBox(
+                    "Enter text or an emoji to search stickers.",
+                    "Sticker Search",
+                    wx.OK | wx.ICON_INFORMATION,
+                    dlg,
+                )
+                return
+            search_btn.Disable()
+            results_list.Clear()
+            sticker_docs.clear()
+            threading.Thread(
+                target=self._search_stickers_thread,
+                args=(emoji, results_list, sticker_docs, search_btn, dlg),
+                daemon=True,
+            ).start()
+
+        def _on_list_key(event):
+            if event.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+                dlg.EndModal(wx.ID_OK)
+            else:
+                event.Skip()
+
+        search_btn.Bind(wx.EVT_BUTTON, _on_search)
+        emoji_ctrl.Bind(wx.EVT_TEXT_ENTER, _on_search)
+        results_list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: dlg.EndModal(wx.ID_OK))
+        results_list.Bind(wx.EVT_KEY_DOWN, _on_list_key)
+
+        if dlg.ShowModal() == wx.ID_OK:
+            sel = results_list.GetSelection()
+            if sel != wx.NOT_FOUND and sel < len(sticker_docs):
+                sticker = sticker_docs[sel]
+                entity = self._current_entity
+                reply_to = None
+                if self.message_panel._reply_to_msg:
+                    reply_to = self.message_panel._reply_to_msg.id
+                self.message_panel.clear_reply()
+                self.SetStatusText("Sending sticker...")
+                self._msg_frame.SetStatusText("Sending sticker...")
+                threading.Thread(
+                    target=self._send_sticker_thread,
+                    args=(entity, sticker, reply_to),
+                    daemon=True,
+                ).start()
+        dlg.Destroy()
+
+    def _search_stickers_thread(self, emoji, results_list, sticker_docs, search_btn, dlg):
+        try:
+            result = self.tg.submit_wait(self.tg.search_stickers(emoji))
+            stickers = getattr(result, "stickers", [])
+            items = []
+            docs = []
+            for doc in stickers[:50]:
+                alt = ""
+                name = ""
+                set_name = ""
+                for attr in getattr(doc, "attributes", []):
+                    attr_name = type(attr).__name__
+                    if attr_name == "DocumentAttributeSticker":
+                        alt = getattr(attr, "alt", "") or ""
+                        stickerset = getattr(attr, "stickerset", None)
+                        if stickerset:
+                            set_name = getattr(stickerset, "short_name", "") or ""
+                    elif attr_name == "DocumentAttributeFilename":
+                        name = getattr(attr, "file_name", "") or ""
+                display = alt or name or f"Sticker {doc.id}"
+                if set_name:
+                    display = f"{display} ({set_name})"
+                items.append(display)
+                docs.append(doc)
+
+            def _update():
+                if not dlg:
+                    return
+                results_list.Clear()
+                sticker_docs.clear()
+                for item in items:
+                    results_list.Append(item)
+                sticker_docs.extend(docs)
+                if results_list.GetCount() > 0:
+                    results_list.SetSelection(0)
+                search_btn.Enable()
+                if items:
+                    announce(f"{len(items)} stickers found")
+                else:
+                    announce("No stickers found")
+
+            wx.CallAfter(_update)
+        except Exception as e:
+            log.error("Sticker search failed: %s", e)
+            wx.CallAfter(search_btn.Enable)
+            wx.CallAfter(announce, "Sticker search failed")
+
+    def _send_sticker_thread(self, entity, sticker, reply_to=None):
+        try:
+            msg = self.tg.submit_wait(
+                self.tg.send_sticker(entity, sticker, reply_to=reply_to)
+            )
+            wx.CallAfter(self._on_send_success, entity, msg)
+        except Exception as e:
+            log.error("Failed to send sticker: %s", e)
+            wx.CallAfter(
+                self._show_error,
+                f"Failed to send sticker:\n{e}",
             )
             wx.CallAfter(self.SetStatusText, "Ready")
             wx.CallAfter(self._msg_frame.SetStatusText, "Ready")
@@ -1246,6 +1509,24 @@ class MainFrame(wx.Frame):
         self.chat_list.update_chat_preview(
             chat_id, msg, increment_unread=False
         )
+
+    def _on_outbox_read(self, data):
+        chat_id = data.get("chat_id")
+        max_id = data.get("max_id", 0)
+        if not self._current_entity:
+            return
+        current_id = getattr(self._current_entity, "id", None)
+        if not current_id or chat_id != current_id:
+            return
+        # Update read_outbox_max_id and refresh affected messages
+        if max_id > self._read_outbox_max_id:
+            self._read_outbox_max_id = max_id
+            self.message_panel._read_outbox_max_id = max_id
+            # Update displayed strings for outgoing messages now marked as seen
+            for i, msg in enumerate(self._current_messages):
+                if msg.out and msg.id <= max_id:
+                    list_idx = len(self._current_messages) - 1 - i
+                    self.message_panel.update_message_at(list_idx, msg)
 
     def delete_selected_message(self):
         idx = self.message_panel.get_selected_message_index()
@@ -1654,7 +1935,8 @@ class MainFrame(wx.Frame):
         status = f"New message in {chat_type} from {sender}: {preview}"
         self.SetStatusText(status)
         self._msg_frame.SetStatusText(status)
-        announce(status)
+        if not muted:
+            announce(status)
         if not muted and self.config.get("notify_when_minimized", True):
             if not self.IsShown() or self.IsIconized():
                 try:
@@ -1722,7 +2004,11 @@ class MainFrame(wx.Frame):
         self._start_call(video=True)
 
     def _start_call(self, video=False):
-        entity = self._current_entity
+        # Prefer the chat list selection when the message frame is hidden,
+        # because _current_entity may be stale from a previously closed chat.
+        entity = None
+        if self._msg_frame.IsShown():
+            entity = self._current_entity
         if not entity:
             dialog = self.chat_list.get_selected_dialog()
             if dialog:
@@ -1944,6 +2230,9 @@ class MainFrame(wx.Frame):
                 self.config["input_device_index"] = dlg.GetInputDeviceIndex()
                 self.config["camera_device_index"] = dlg.GetCameraDeviceIndex()
                 self.config["sounds_enabled"] = dlg.GetSoundsEnabled()
+                self.config["announcements_enabled"] = dlg.GetAnnouncementsEnabled()
+                self.config["announcement_backend"] = dlg.GetAnnouncementBackend()
+                self.config["announcement_voice_index"] = dlg.GetAnnouncementVoiceIndex()
                 self.config["sound_pack"] = dlg.GetSoundPack()
                 self.config["notify_when_minimized"] = dlg.GetNotifyWhenMinimized()
                 self.config["time_format"] = dlg.GetTimeFormat()
@@ -1951,6 +2240,15 @@ class MainFrame(wx.Frame):
                 self.config["message_limit"] = dlg.GetMessageLimit()
                 self.config.save()
                 self.sound.set_output_device(dlg.GetOutputDeviceIndex())
+                set_announcements_enabled(
+                    self.config.get("announcements_enabled", False)
+                )
+                backend_pref = self.config.get("announcement_backend", "auto")
+                set_announcement_preferences(
+                    auto_best=(not backend_pref or str(backend_pref).lower() == "auto"),
+                    backend_name="" if not backend_pref else str(backend_pref),
+                    voice_index=self.config.get("announcement_voice_index", -1),
+                )
 
     # ---------------------------------------------------- Account / Mute
 
@@ -2459,7 +2757,7 @@ class MainFrame(wx.Frame):
             "Other",
         ]
         reason_choice = wx.Choice(dlg, choices=reasons)
-        reason_choice.SetName("Reason")
+        reason_choice.SetName("Report reason")
         reason_choice.SetSelection(0)
         sizer.Add(reason_choice, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
 
@@ -2581,12 +2879,18 @@ class MainFrame(wx.Frame):
 
     # ------------------------------------------------------- Group Actions
 
-    def _is_group_or_channel(self):
-        if not self._current_entity:
-            return False
-        from telethon.tl.types import Channel, Chat
+    def _get_selected_group_or_channel_entity(self):
+        # Prefer the chat list selection so menu actions work without opening
+        # and closing the chat first (which would refresh _current_entity).
+        dialog = self.chat_list.get_selected_dialog()
+        if dialog and self._is_entity_group_or_channel(dialog.entity):
+            return dialog.entity
+        if self._current_entity and self._is_entity_group_or_channel(self._current_entity):
+            return self._current_entity
+        return None
 
-        return isinstance(self._current_entity, (Channel, Chat))
+    def _is_group_or_channel(self):
+        return self._get_selected_group_or_channel_entity() is not None
 
     @staticmethod
     def _is_entity_group_or_channel(entity):
@@ -2645,40 +2949,33 @@ class MainFrame(wx.Frame):
         self._load_dialogs()
 
     def _on_create_group(self, event):
-        from .theme import apply_theme
-
-        dlg = wx.TextEntryDialog(
-            self,
-            "Enter a name for the new group:",
-            "Create Group",
-        )
-        apply_theme(dlg)
+        dlg = CreateGroupDialog(self)
         if dlg.ShowModal() != wx.ID_OK:
             dlg.Destroy()
             return
-        title = dlg.GetValue().strip()
+        title = dlg.GetTitle()
+        usernames_text = dlg.GetInviteUsernames()
+        is_public = dlg.IsPublic()
+        public_username = dlg.GetPublicUsername()
         dlg.Destroy()
         if not title:
             return
-        dlg = wx.TextEntryDialog(
-            self,
-            "Enter usernames to invite (comma-separated, or leave empty):",
-            "Create Group - Invite Members",
-        )
-        apply_theme(dlg)
-        if dlg.ShowModal() != wx.ID_OK:
-            dlg.Destroy()
+        if is_public and not public_username:
+            wx.MessageBox(
+                "Public groups require a public username.",
+                "Create Group",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
             return
-        usernames_text = dlg.GetValue().strip()
-        dlg.Destroy()
         self.SetStatusText(f"Creating group {title}...")
         threading.Thread(
             target=self._create_group_thread,
-            args=(title, usernames_text),
+            args=(title, usernames_text, is_public, public_username),
             daemon=True,
         ).start()
 
-    def _create_group_thread(self, title, usernames_text):
+    def _create_group_thread(self, title, usernames_text, is_public, public_username):
         try:
             users = []
             if usernames_text:
@@ -2689,10 +2986,17 @@ class MainFrame(wx.Frame):
                             self.tg.get_entity(u)
                         )
                         users.append(entity)
-            if not users:
+            if not users and not is_public:
                 me = self.tg.submit_wait(self.tg.get_me())
                 users.append(me)
-            self.tg.submit_wait(self.tg.create_group(title, users))
+            self.tg.submit_wait(
+                self.tg.create_group(
+                    title,
+                    users,
+                    is_public=is_public,
+                    public_username=public_username,
+                )
+            )
             wx.CallAfter(self._on_group_created, title)
         except Exception as e:
             log.error("Failed to create group: %s", e)
@@ -2710,43 +3014,41 @@ class MainFrame(wx.Frame):
         self._load_dialogs()
 
     def _on_create_channel(self, event):
-        from .theme import apply_theme
-
-        dlg = wx.TextEntryDialog(
-            self,
-            "Enter a name for the new channel:",
-            "Create Channel",
-        )
-        apply_theme(dlg)
+        dlg = CreateChannelDialog(self)
         if dlg.ShowModal() != wx.ID_OK:
             dlg.Destroy()
             return
-        title = dlg.GetValue().strip()
+        title = dlg.GetTitle()
+        about = dlg.GetAbout()
+        is_public = dlg.IsPublic()
+        public_username = dlg.GetPublicUsername()
         dlg.Destroy()
         if not title:
             return
-        dlg = wx.TextEntryDialog(
-            self,
-            "Enter a description for the channel (optional):",
-            "Create Channel - Description",
-        )
-        apply_theme(dlg)
-        if dlg.ShowModal() != wx.ID_OK:
-            dlg.Destroy()
+        if is_public and not public_username:
+            wx.MessageBox(
+                "Public channels require a public username.",
+                "Create Channel",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
             return
-        about = dlg.GetValue().strip()
-        dlg.Destroy()
         self.SetStatusText(f"Creating channel {title}...")
         threading.Thread(
             target=self._create_channel_thread,
-            args=(title, about),
+            args=(title, about, is_public, public_username),
             daemon=True,
         ).start()
 
-    def _create_channel_thread(self, title, about):
+    def _create_channel_thread(self, title, about, is_public, public_username):
         try:
             self.tg.submit_wait(
-                self.tg.create_channel(title, about=about)
+                self.tg.create_channel(
+                    title,
+                    about=about,
+                    is_public=is_public,
+                    public_username=public_username,
+                )
             )
             wx.CallAfter(self._on_channel_created, title)
         except Exception as e:
@@ -2767,7 +3069,8 @@ class MainFrame(wx.Frame):
     def _on_invite_user(self, event):
         from .theme import apply_theme
 
-        if not self._is_group_or_channel():
+        entity = self._get_selected_group_or_channel_entity()
+        if not entity:
             wx.MessageBox(
                 "Select a group or channel first.",
                 "Invite User",
@@ -2788,7 +3091,6 @@ class MainFrame(wx.Frame):
         dlg.Destroy()
         if not username:
             return
-        entity = self._current_entity
         self.SetStatusText(f"Inviting {username}...")
         threading.Thread(
             target=self._invite_user_thread,
@@ -2817,7 +3119,8 @@ class MainFrame(wx.Frame):
             wx.CallAfter(self.SetStatusText, "Ready")
 
     def _on_leave_group(self, event):
-        if not self._is_group_or_channel():
+        entity = self._get_selected_group_or_channel_entity()
+        if not entity:
             wx.MessageBox(
                 "Select a group or channel first.",
                 "Leave Group",
@@ -2826,8 +3129,8 @@ class MainFrame(wx.Frame):
             )
             return
         name = (
-            getattr(self._current_entity, "title", None)
-            or getattr(self._current_entity, "username", None)
+            getattr(entity, "title", None)
+            or getattr(entity, "username", None)
             or "this group"
         )
         if wx.MessageBox(
@@ -2837,12 +3140,59 @@ class MainFrame(wx.Frame):
             self,
         ) != wx.YES:
             return
-        entity = self._current_entity
         threading.Thread(
             target=self._leave_group_thread,
             args=(entity,),
             daemon=True,
         ).start()
+
+    def _on_generate_invite_link(self, event):
+        entity = self._get_selected_group_or_channel_entity()
+        if not entity:
+            wx.MessageBox(
+                "Select a group or channel first.",
+                "Invite Link",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            return
+        self.SetStatusText("Generating invite link...")
+        threading.Thread(
+            target=self._generate_invite_link_thread,
+            args=(entity,),
+            daemon=True,
+        ).start()
+
+    def _generate_invite_link_thread(self, entity):
+        try:
+            link = self.tg.submit_wait(self.tg.export_invite_link(entity))
+            wx.CallAfter(self._on_invite_link_generated, link)
+        except Exception as e:
+            log.error("Failed to generate invite link: %s", e)
+            wx.CallAfter(
+                self._show_error,
+                f"Failed to generate invite link:\n{e}",
+                "Invite Link",
+            )
+            wx.CallAfter(self.SetStatusText, "Ready")
+
+    def _on_invite_link_generated(self, link):
+        if not link:
+            self._show_error("No invite link was returned.", "Invite Link")
+            self.SetStatusText("Ready")
+            return
+        if wx.TheClipboard.Open():
+            wx.TheClipboard.SetData(wx.TextDataObject(link))
+            wx.TheClipboard.Close()
+        self.SetStatusText("Invite link copied to clipboard")
+        self._msg_frame.SetStatusText("Invite link copied to clipboard")
+        announce("Invite link copied to clipboard")
+        wx.MessageBox(
+            f"Invite link:\n{link}\n\nThe link has been copied to your clipboard.",
+            "Invite Link",
+            wx.OK | wx.ICON_INFORMATION,
+            self,
+        )
 
     def _leave_group_thread(self, entity):
         try:
@@ -2872,7 +3222,8 @@ class MainFrame(wx.Frame):
         self.chat_list.list_ctrl.SetFocus()
 
     def _on_view_members(self, event):
-        if not self._is_group_or_channel():
+        entity = self._get_selected_group_or_channel_entity()
+        if not entity:
             wx.MessageBox(
                 "Select a group or channel first.",
                 "Members",
@@ -2881,7 +3232,6 @@ class MainFrame(wx.Frame):
             )
             return
         self.SetStatusText("Loading members...")
-        entity = self._current_entity
         threading.Thread(
             target=self._load_members_thread,
             args=(entity,),
@@ -2893,7 +3243,7 @@ class MainFrame(wx.Frame):
             participants = self.tg.submit_wait(
                 self.tg.get_participants(entity)
             )
-            wx.CallAfter(self._on_members_loaded, list(participants))
+            wx.CallAfter(self._on_members_loaded, entity, list(participants))
         except Exception as e:
             log.error("Failed to load members: %s", e)
             wx.CallAfter(
@@ -2903,33 +3253,220 @@ class MainFrame(wx.Frame):
             )
             wx.CallAfter(self.SetStatusText, "Ready")
 
-    def _on_members_loaded(self, participants):
+    def _on_members_loaded(self, entity, participants):
         from .theme import apply_theme
 
-        lines = []
-        for p in participants:
-            name = getattr(p, "first_name", "") or ""
-            last = getattr(p, "last_name", "") or ""
-            uname = getattr(p, "username", "") or ""
-            display = f"{name} {last}".strip()
-            if uname:
-                display += f" (@{uname})"
-            lines.append(display)
+        lines = [self._member_entry_text(p) for p in participants]
+        scope_label, permissions_supported = self._members_scope(entity)
         self.SetStatusText(f"{len(participants)} members")
-        dlg = wx.SingleChoiceDialog(
+
+        dlg = wx.Dialog(
             self,
-            f"{len(participants)} members:",
-            "Group Members",
-            lines if lines else ["No members found"],
+            title="Group Members",
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
         )
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(
+            wx.StaticText(dlg, label=f"{len(participants)} members:"),
+            flag=wx.ALL,
+            border=10,
+        )
+        sizer.Add(
+            wx.StaticText(dlg, label=f"Type: {scope_label}"),
+            flag=wx.LEFT | wx.RIGHT,
+            border=10,
+        )
+        members_list = wx.ListBox(dlg, choices=lines, style=wx.LB_SINGLE)
+        members_list.SetName("Group members")
+        if lines:
+            members_list.SetSelection(0)
+        sizer.Add(members_list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        actions = wx.BoxSizer(wx.HORIZONTAL)
+        role_btn = wx.Button(dlg, label="&Role...")
+        permissions_btn = wx.Button(dlg, label="&Permissions...")
+        kick_btn = wx.Button(dlg, label="&Kick")
+        close_btn = wx.Button(dlg, wx.ID_CLOSE, "&Close")
+        if not permissions_supported:
+            permissions_btn.SetToolTip(
+                "Per-member permissions are available only in channels and supergroups"
+            )
+        actions.Add(role_btn, 0, wx.RIGHT, 8)
+        actions.Add(permissions_btn, 0, wx.RIGHT, 8)
+        actions.Add(kick_btn, 0, wx.RIGHT, 8)
+        actions.Add(close_btn, 0)
+        sizer.Add(actions, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+
+        def _selected_member():
+            idx = members_list.GetSelection()
+            if idx == wx.NOT_FOUND or idx >= len(participants):
+                return None, None
+            return participants[idx], lines[idx]
+
+        def _update_member_action_state():
+            member, _ = _selected_member()
+            if not member:
+                role_btn.Enable(False)
+                permissions_btn.Enable(False)
+                kick_btn.Enable(False)
+                return
+
+            role_kind = self._member_role_kind(member)
+            is_owner = role_kind == "owner"
+            role_btn.Enable(not is_owner)
+            kick_btn.Enable(not is_owner)
+            permissions_btn.Enable(permissions_supported and not is_owner)
+
+        _update_member_action_state()
+
+        def _on_permissions(event):
+            member, display = _selected_member()
+            if not member:
+                return
+            if self._member_role_kind(member) == "owner":
+                wx.MessageBox(
+                    "The chat owner permissions cannot be edited from here.",
+                    "Permissions",
+                    wx.OK | wx.ICON_INFORMATION,
+                    dlg,
+                )
+                return
+            with MemberPermissionsDialog(dlg, display) as permissions_dlg:
+                if permissions_dlg.ShowModal() != wx.ID_OK:
+                    return
+                permissions = permissions_dlg.GetPermissions()
+            self.SetStatusText(f"Updating permissions for {display}...")
+            threading.Thread(
+                target=self._set_member_permissions_thread,
+                args=(entity, member, display, permissions),
+                daemon=True,
+            ).start()
+
+        def _on_role(event):
+            member, display = _selected_member()
+            if not member:
+                return
+            role_kind = self._member_role_kind(member)
+            if role_kind == "owner":
+                wx.MessageBox(
+                    "The chat owner role cannot be changed.",
+                    "Member Role",
+                    wx.OK | wx.ICON_INFORMATION,
+                    dlg,
+                )
+                return
+
+            choices = ["Member", "Admin"]
+            role_dlg = wx.SingleChoiceDialog(
+                dlg,
+                f"Set role for {display}:",
+                "Member Role",
+                choices,
+            )
+            apply_theme(role_dlg)
+            role_dlg.SetSelection(1 if role_kind == "admin" else 0)
+            if role_dlg.ShowModal() != wx.ID_OK:
+                role_dlg.Destroy()
+                return
+            selected = role_dlg.GetStringSelection()
+            role_dlg.Destroy()
+
+            make_admin = selected == "Admin"
+            action_text = "Promoting" if make_admin else "Removing admin role from"
+            self.SetStatusText(f"{action_text} {display}...")
+            threading.Thread(
+                target=self._set_member_role_thread,
+                args=(entity, member, display, make_admin),
+                daemon=True,
+            ).start()
+
+        def _on_kick(event):
+            member, display = _selected_member()
+            if not member:
+                return
+            if self._member_role_kind(member) == "owner":
+                wx.MessageBox(
+                    "The chat owner cannot be removed.",
+                    "Kick Member",
+                    wx.OK | wx.ICON_INFORMATION,
+                    dlg,
+                )
+                return
+            if wx.MessageBox(
+                f"Kick {display} from this group?",
+                "Confirm Kick",
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
+                dlg,
+            ) != wx.YES:
+                return
+            self.SetStatusText(f"Kicking {display}...")
+            threading.Thread(
+                target=self._kick_member_entity_thread,
+                args=(entity, member, display),
+                daemon=True,
+            ).start()
+
+        members_list.Bind(wx.EVT_LISTBOX, lambda e: _update_member_action_state())
+        role_btn.Bind(wx.EVT_BUTTON, _on_role)
+        permissions_btn.Bind(wx.EVT_BUTTON, _on_permissions)
+        kick_btn.Bind(wx.EVT_BUTTON, _on_kick)
+        close_btn.Bind(wx.EVT_BUTTON, lambda e: dlg.EndModal(wx.ID_CLOSE))
+
+        dlg.SetSizerAndFit(sizer)
+        dlg.SetMinSize((460, 360))
+        dlg.CenterOnParent()
         apply_theme(dlg)
         dlg.ShowModal()
         dlg.Destroy()
 
+    @staticmethod
+    def _member_display_name(member):
+        name = getattr(member, "first_name", "") or ""
+        last = getattr(member, "last_name", "") or ""
+        uname = getattr(member, "username", "") or ""
+        display = f"{name} {last}".strip() or "Unknown"
+        if uname:
+            display += f" (@{uname})"
+        return display
+
+    @classmethod
+    def _member_entry_text(cls, member):
+        display = cls._member_display_name(member)
+        role_kind = cls._member_role_kind(member)
+        role_suffix = {
+            "owner": "Owner",
+            "admin": "Admin",
+            "member": "Member",
+        }.get(role_kind, "Member")
+        return f"{display} [{role_suffix}]"
+
+    @staticmethod
+    def _member_role_kind(member):
+        participant = getattr(member, "participant", None)
+        part_name = type(participant).__name__ if participant is not None else ""
+        if "Creator" in part_name:
+            return "owner"
+        if "Admin" in part_name:
+            return "admin"
+        return "member"
+
+    @staticmethod
+    def _members_scope(entity):
+        from telethon.tl.types import Channel, Chat
+
+        if isinstance(entity, Chat):
+            return "Basic Group", False
+        if isinstance(entity, Channel):
+            if getattr(entity, "megagroup", False):
+                return "Supergroup", True
+            return "Channel", True
+        return "Unknown", False
+
     def _on_kick_member(self, event):
         from .theme import apply_theme
 
-        if not self._is_group_or_channel():
+        entity = self._get_selected_group_or_channel_entity()
+        if not entity:
             wx.MessageBox(
                 "Select a group or channel first.",
                 "Kick Member",
@@ -2957,7 +3494,6 @@ class MainFrame(wx.Frame):
             self,
         ) != wx.YES:
             return
-        entity = self._current_entity
         threading.Thread(
             target=self._kick_member_thread,
             args=(entity, username),
@@ -2981,10 +3517,79 @@ class MainFrame(wx.Frame):
                 "Kick Member",
             )
 
+    def _kick_member_entity_thread(self, entity, user, display_name):
+        try:
+            self.tg.submit_wait(self.tg.kick_participant(entity, user))
+
+            def _on_kicked(name=display_name):
+                self.SetStatusText(f"Kicked {name}")
+                self._msg_frame.SetStatusText(f"Kicked {name}")
+                announce(f"Kicked {name}")
+
+            wx.CallAfter(_on_kicked)
+        except Exception as e:
+            log.error("Failed to kick member: %s", e)
+            wx.CallAfter(
+                self._show_error,
+                f"Failed to kick member:\n{e}",
+                "Kick Member",
+            )
+
+    def _set_member_permissions_thread(self, entity, user, display_name, permissions):
+        try:
+            self.tg.submit_wait(
+                self.tg.set_member_permissions(entity, user, permissions)
+            )
+
+            def _on_permissions_updated(name=display_name):
+                self.SetStatusText(f"Updated permissions for {name}")
+                self._msg_frame.SetStatusText(f"Updated permissions for {name}")
+                announce(f"Updated permissions for {name}")
+
+            wx.CallAfter(_on_permissions_updated)
+        except Exception as e:
+            log.error("Failed to update member permissions: %s", e)
+            wx.CallAfter(
+                self._show_error,
+                f"Failed to update permissions:\n{e}",
+                "Permissions",
+            )
+
+    def _set_member_role_thread(self, entity, user, display_name, make_admin):
+        try:
+            self.tg.submit_wait(
+                self.tg.set_member_admin_role(
+                    entity,
+                    user,
+                    make_admin=make_admin,
+                    rank="Admin" if make_admin else "",
+                )
+            )
+
+            def _on_role_updated(name=display_name, is_admin=make_admin):
+                if is_admin:
+                    self.SetStatusText(f"Promoted {name} to admin")
+                    self._msg_frame.SetStatusText(f"Promoted {name} to admin")
+                    announce(f"Promoted {name} to admin")
+                else:
+                    self.SetStatusText(f"Removed admin role from {name}")
+                    self._msg_frame.SetStatusText(f"Removed admin role from {name}")
+                    announce(f"Removed admin role from {name}")
+
+            wx.CallAfter(_on_role_updated)
+        except Exception as e:
+            log.error("Failed to update member role: %s", e)
+            wx.CallAfter(
+                self._show_error,
+                f"Failed to update member role:\n{e}",
+                "Member Role",
+            )
+
     def _on_edit_title(self, event):
         from .theme import apply_theme
 
-        if not self._is_group_or_channel():
+        entity = self._get_selected_group_or_channel_entity()
+        if not entity:
             wx.MessageBox(
                 "Select a group or channel first.",
                 "Edit Title",
@@ -2993,7 +3598,7 @@ class MainFrame(wx.Frame):
             )
             return
         current_title = (
-            getattr(self._current_entity, "title", "") or ""
+            getattr(entity, "title", "") or ""
         )
         dlg = wx.TextEntryDialog(
             self,
@@ -3009,7 +3614,6 @@ class MainFrame(wx.Frame):
         dlg.Destroy()
         if not new_title:
             return
-        entity = self._current_entity
         threading.Thread(
             target=self._edit_title_thread,
             args=(entity, new_title),
@@ -3087,7 +3691,7 @@ class MainFrame(wx.Frame):
             border=10,
         )
         url_list = wx.ListBox(dlg, choices=urls, style=wx.LB_SINGLE)
-        url_list.SetName("Links")
+        url_list.SetName("Message links")
         url_list.SetSelection(0)
         sizer.Add(url_list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         btn_sizer = dlg.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
@@ -3158,7 +3762,8 @@ class MainFrame(wx.Frame):
             "  Audio plays inline, video opens in your default player\n"
             "  Ctrl+Shift+S: Save the selected voice message or file attachment\n"
             "  Press the Save button on a message with media to download it\n"
-            "  Press the Open Link button on a message with a URL to open it\n\n"
+            "  Press the Open Link button on a message with a URL to open it\n"
+            "  Press the Sticker button to search and send stickers by emoji\n\n"
             "Files (Groups and Channels):\n"
             "  The Files tab shows all documents shared in a group or channel\n"
             "  Type in the search box to search by file name\n"

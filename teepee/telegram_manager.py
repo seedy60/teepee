@@ -19,6 +19,7 @@ class TelegramManager:
         self.on_new_message = None
         self.on_message_sent = None
         self.on_message_edited = None
+        self.on_message_read = None
         self.on_incoming_call = None
         self.call_manager = None
 
@@ -87,10 +88,97 @@ class TelegramManager:
             entity, file_path, voice_note=True, reply_to=reply_to
         )
 
-    async def send_file(self, entity, file_path, reply_to=None, caption=""):
+    async def send_file(self, entity, file_path, reply_to=None, caption="", force_document=True):
         return await self.client.send_file(
-            entity, file_path, caption=caption, reply_to=reply_to
+            entity, file_path, caption=caption, reply_to=reply_to,
+            force_document=force_document,
         )
+
+    async def send_sticker(self, entity, sticker, reply_to=None):
+        return await self.client.send_file(entity, sticker, reply_to=reply_to)
+
+    async def get_sticker_set(self, short_name):
+        from telethon.tl.functions.messages import GetStickerSetRequest
+        from telethon.tl.types import InputStickerSetShortName
+
+        result = await self.client(
+            GetStickerSetRequest(
+                stickerset=InputStickerSetShortName(short_name=short_name),
+                hash=0,
+            )
+        )
+        return result
+
+    async def search_stickers(self, query):
+        """Search stickers by emoji character or by text keyword.
+
+        If the query contains emoji characters, searches stickers for that emoji.
+        Otherwise, searches sticker sets by name and returns stickers from matches.
+        """
+        if not query or not query.strip():
+            return type("Empty", (), {"stickers": []})()
+
+        # Detect if input contains emoji (non-ASCII characters in common emoji ranges)
+        has_emoji = any(
+            ord(ch) > 0x2000 for ch in query
+        )
+
+        if has_emoji:
+            from telethon.tl.functions.messages import GetStickersRequest
+
+            result = await self.client(GetStickersRequest(emoticon=query, hash=0))
+            return result
+
+        # Text search: find sticker sets by name, then collect their stickers
+        from telethon.tl.functions.messages import (
+            GetStickerSetRequest,
+            SearchStickerSetsRequest,
+        )
+        from telethon.tl.types import InputStickerSetID
+
+        found = await self.client(
+            SearchStickerSetsRequest(q=query, hash=0)
+        )
+        sets = getattr(found, "sets", [])
+        all_stickers = []
+        # Collect stickers from up to 5 matching sets
+        for covered in sets[:5]:
+            sticker_set = getattr(covered, "set", None)
+            if not sticker_set:
+                continue
+            # Get full sticker set with all documents
+            try:
+                full = await self.client(
+                    GetStickerSetRequest(
+                        stickerset=InputStickerSetID(
+                            id=sticker_set.id,
+                            access_hash=sticker_set.access_hash,
+                        ),
+                        hash=0,
+                    )
+                )
+                docs = getattr(full, "documents", [])
+                all_stickers.extend(docs)
+            except Exception:
+                # Fall back to cover documents if full set fetch fails
+                covers = getattr(covered, "covers", None)
+                if covers:
+                    all_stickers.extend(covers)
+                else:
+                    cover = getattr(covered, "cover", None)
+                    if cover:
+                        all_stickers.append(cover)
+
+        return type("TextResult", (), {"stickers": all_stickers})()
+
+    async def get_read_outbox_max_id(self, entity):
+        from telethon.tl.functions.messages import GetPeerDialogsRequest
+
+        peer = await self.client.get_input_entity(entity)
+        result = await self.client(GetPeerDialogsRequest(peers=[peer]))
+        if result.dialogs:
+            return result.dialogs[0].read_outbox_max_id
+        return 0
 
     async def download_media(self, message, path):
         return await self.client.download_media(message, file=str(path))
@@ -102,7 +190,16 @@ class TelegramManager:
         return await self.client.delete_messages(entity, message_ids, revoke=revoke)
 
     async def delete_dialog(self, entity, revoke=True):
-        return await self.client.delete_dialog(entity, revoke=revoke)
+        from telethon.errors import ChatAdminRequiredError
+
+        try:
+            return await self.client.delete_dialog(entity, revoke=revoke)
+        except ChatAdminRequiredError:
+            # Some chats/channels disallow revoke-history delete unless admin.
+            # Fall back to local-only deletion to avoid false failure.
+            if revoke:
+                return await self.client.delete_dialog(entity, revoke=False)
+            raise
 
     async def click_inline_button(self, msg, button_data):
         return await msg.click(data=button_data)
@@ -114,33 +211,97 @@ class TelegramManager:
 
     async def leave_channel(self, entity):
         from telethon.tl.functions.channels import LeaveChannelRequest
+        from telethon.tl.functions.messages import DeleteChatUserRequest
+        from telethon.tl.types import Chat
 
-        return await self.client(LeaveChannelRequest(entity))
+        peer = await self.client.get_entity(entity)
+
+        # Basic groups (Chat) and channels/supergroups (Channel)
+        # use different MTProto requests.
+        if isinstance(peer, Chat):
+            me = await self.client.get_input_entity("me")
+            return await self.client(
+                DeleteChatUserRequest(
+                    chat_id=peer.id,
+                    user_id=me,
+                    revoke_history=False,
+                )
+            )
+
+        return await self.client(LeaveChannelRequest(peer))
 
     async def get_participants(self, entity, limit=200):
         return await self.client.get_participants(entity, limit=limit)
 
     async def kick_participant(self, entity, user):
         from telethon.tl.functions.channels import EditBannedRequest
+        from telethon.tl.functions.messages import DeleteChatUserRequest
         from telethon.tl.types import ChatBannedRights
+        from telethon.tl.types import Chat
+
+        peer = await self.client.get_entity(entity)
+
+        # Basic groups (Chat) and channels/supergroups (Channel)
+        # use different MTProto requests.
+        if isinstance(peer, Chat):
+            return await self.client(
+                DeleteChatUserRequest(
+                    chat_id=peer.id,
+                    user_id=user,
+                    revoke_history=True,
+                )
+            )
 
         rights = ChatBannedRights(until_date=None, view_messages=True)
-        return await self.client(EditBannedRequest(entity, user, rights))
+        return await self.client(EditBannedRequest(peer, user, rights))
 
     async def edit_chat_title(self, entity, title):
         from telethon.tl.functions.channels import EditTitleRequest
 
         return await self.client(EditTitleRequest(entity, title))
 
-    async def create_group(self, title, users):
+    async def create_group(
+        self,
+        title,
+        users,
+        is_public=False,
+        public_username="",
+    ):
         from telethon.tl.functions.messages import CreateChatRequest
+
+        if is_public:
+            created = await self.create_channel(
+                title,
+                about="",
+                megagroup=True,
+                is_public=True,
+                public_username=public_username,
+            )
+            if users:
+                await self.invite_to_channel(created, users)
+            return created
 
         return await self.client(CreateChatRequest(title=title, users=users))
 
-    async def create_channel(self, title, about="", megagroup=False):
+    async def create_channel(
+        self,
+        title,
+        about="",
+        megagroup=False,
+        is_public=False,
+        public_username="",
+    ):
         from telethon.tl.functions.channels import CreateChannelRequest
+        from telethon.tl.functions.channels import UpdateUsernameRequest
+        from telethon.errors import RPCError
+        from telethon.errors import (
+            ChannelsAdminPublicTooMuchError,
+            UsernameInvalidError,
+            UsernameOccupiedError,
+        )
+        from telethon.tl.types import InputChannel
 
-        return await self.client(
+        created = await self.client(
             CreateChannelRequest(
                 title=title,
                 about=about,
@@ -148,11 +309,191 @@ class TelegramManager:
             )
         )
 
+        chats = getattr(created, "chats", None) or []
+        created_peer = chats[0] if chats else created
+        if is_public and public_username:
+            # UpdateUsernameRequest needs InputChannel with integer ids.
+            if isinstance(created_peer, InputChannel):
+                channel_input = created_peer
+            else:
+                channel_id = int(getattr(created_peer, "id", 0))
+                access_hash = int(getattr(created_peer, "access_hash", 0))
+                if not channel_id or not access_hash:
+                    resolved = await self.client.get_entity(created_peer)
+                    channel_id = int(getattr(resolved, "id", 0))
+                    access_hash = int(getattr(resolved, "access_hash", 0))
+                channel_input = InputChannel(
+                    channel_id=channel_id,
+                    access_hash=access_hash,
+                )
+
+            try:
+                await self.client(
+                    UpdateUsernameRequest(
+                        channel=channel_input,
+                        username=public_username,
+                    )
+                )
+            except UsernameInvalidError as e:
+                raise RuntimeError(
+                    "Invalid public username. Use 5-32 letters, numbers, and underscores."
+                ) from e
+            except UsernameOccupiedError as e:
+                raise RuntimeError(
+                    "That public username is already taken."
+                ) from e
+            except ChannelsAdminPublicTooMuchError as e:
+                raise RuntimeError(
+                    "You already have too many public channels/groups."
+                ) from e
+            except RPCError as e:
+                if type(e).__name__ == "UsernamePurchaseAvailableError":
+                    raise RuntimeError(
+                        "That public username is a purchasable collectible on Telegram and cannot be assigned for free. Choose a different username."
+                    ) from e
+                raise RuntimeError(
+                    f"Telegram rejected public username setup: {type(e).__name__}: {e!r}"
+                ) from e
+            except Exception as e:
+                raise RuntimeError(
+                    f"Telegram rejected public username setup: {type(e).__name__}: {e!r}"
+                ) from e
+
+        return created_peer
+
     async def invite_to_channel(self, entity, users):
         from telethon.tl.functions.channels import InviteToChannelRequest
+        from telethon.tl.functions.messages import AddChatUserRequest
+        from telethon.tl.types import Chat
+
+        peer = await self.client.get_entity(entity)
+
+        # Basic groups (Chat) and channels/supergroups (Channel)
+        # use different MTProto requests.
+        if isinstance(peer, Chat):
+            result = None
+            for user in users:
+                result = await self.client(
+                    AddChatUserRequest(
+                        chat_id=peer.id,
+                        user_id=user,
+                        fwd_limit=0,
+                    )
+                )
+            return result
 
         return await self.client(
-            InviteToChannelRequest(channel=entity, users=users)
+            InviteToChannelRequest(channel=peer, users=users)
+        )
+
+    async def export_invite_link(self, entity):
+        from telethon.tl.functions.messages import ExportChatInviteRequest
+
+        peer = await self.client.get_input_entity(entity)
+        result = await self.client(ExportChatInviteRequest(peer=peer))
+        return getattr(result, "link", "")
+
+    async def set_member_permissions(self, entity, user, permissions):
+        from telethon.tl.functions.channels import EditBannedRequest
+        from telethon.tl.types import Chat
+        from telethon.tl.types import ChatBannedRights
+
+        peer = await self.client.get_entity(entity)
+        if isinstance(peer, Chat):
+            raise RuntimeError(
+                "Per-member permissions are only supported for channels and supergroups."
+            )
+
+        allow_send_messages = bool(permissions.get("send_messages", True))
+        allow_send_media = bool(permissions.get("send_media", True))
+        allow_send_stickers = bool(permissions.get("send_stickers", True))
+        allow_send_polls = bool(permissions.get("send_polls", True))
+        allow_change_info = bool(permissions.get("change_info", True))
+        allow_invite_users = bool(permissions.get("invite_users", True))
+        allow_pin_messages = bool(permissions.get("pin_messages", True))
+
+        rights = ChatBannedRights(
+            until_date=None,
+            view_messages=False,
+            send_messages=not allow_send_messages,
+            send_media=not allow_send_media,
+            send_stickers=not allow_send_stickers,
+            send_gifs=not allow_send_stickers,
+            send_games=not allow_send_stickers,
+            send_inline=not allow_send_stickers,
+            embed_links=not allow_send_media,
+            send_polls=not allow_send_polls,
+            change_info=not allow_change_info,
+            invite_users=not allow_invite_users,
+            pin_messages=not allow_pin_messages,
+        )
+        return await self.client(EditBannedRequest(peer, user, rights))
+
+    async def set_member_admin_role(self, entity, user, make_admin, rank="Admin"):
+        from telethon.tl.functions.channels import EditAdminRequest
+        from telethon.tl.functions.messages import EditChatAdminRequest
+        from telethon.tl.types import Chat
+        from telethon.tl.types import ChatAdminRights
+
+        peer = await self.client.get_entity(entity)
+
+        # Basic groups (Chat) use EditChatAdminRequest.
+        if isinstance(peer, Chat):
+            return await self.client(
+                EditChatAdminRequest(
+                    chat_id=peer.id,
+                    user_id=user,
+                    is_admin=bool(make_admin),
+                )
+            )
+
+        # Channels/supergroups use EditAdminRequest and ChatAdminRights.
+        if make_admin:
+            rights = ChatAdminRights(
+                change_info=True,
+                post_messages=True,
+                edit_messages=True,
+                delete_messages=True,
+                ban_users=True,
+                invite_users=True,
+                pin_messages=True,
+                add_admins=False,
+                anonymous=False,
+                manage_call=True,
+                other=True,
+                manage_topics=True,
+                post_stories=True,
+                edit_stories=True,
+                delete_stories=True,
+            )
+            role_rank = rank or "Admin"
+        else:
+            rights = ChatAdminRights(
+                change_info=False,
+                post_messages=False,
+                edit_messages=False,
+                delete_messages=False,
+                ban_users=False,
+                invite_users=False,
+                pin_messages=False,
+                add_admins=False,
+                anonymous=False,
+                manage_call=False,
+                other=False,
+                manage_topics=False,
+                post_stories=False,
+                edit_stories=False,
+                delete_stories=False,
+            )
+            role_rank = ""
+
+        return await self.client(
+            EditAdminRequest(
+                channel=peer,
+                user_id=user,
+                admin_rights=rights,
+                rank=role_rank,
+            )
         )
 
     async def get_entity(self, username):
@@ -417,6 +758,16 @@ class TelegramManager:
                 "text": msg.text or "",
             }
             wx.CallAfter(self.on_message_edited, data)
+
+        @self.client.on(events.MessageRead(inbox=False))
+        async def _on_read(event):
+            if not self.on_message_read:
+                return
+            data = {
+                "chat_id": event.chat_id,
+                "max_id": event.max_id,
+            }
+            wx.CallAfter(self.on_message_read, data)
 
         @self.client.on(events.NewMessage(outgoing=True))
         async def _on_outgoing(event):

@@ -56,7 +56,10 @@ class FilesPanel(wx.Panel):
         self.download_btn.Bind(wx.EVT_BUTTON, self._on_download)
         self.load_more_btn.Bind(wx.EVT_BUTTON, self._on_load_more)
         self.file_list.Bind(wx.EVT_LISTBOX_DCLICK, self._on_download)
+        self.file_list.Bind(wx.EVT_LISTBOX, self._on_file_selected)
         self.file_list.Bind(wx.EVT_KEY_DOWN, self._on_file_list_key)
+
+        self._sync_controls()
 
     def _on_file_list_key(self, event):
         if event.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
@@ -66,10 +69,12 @@ class FilesPanel(wx.Panel):
 
     def set_entity(self, entity):
         self._entity = entity
+        self._loading = False
         self._files = []
         self._filtered = []
         self.search_ctrl.SetValue("")
         self.file_list.Clear()
+        self._sync_controls()
 
     def load_files(self, entity, query=""):
         if self._loading:
@@ -81,6 +86,7 @@ class FilesPanel(wx.Panel):
         self.file_list.Freeze()
         self.file_list.Clear()
         self.file_list.Thaw()
+        self._sync_controls()
         self._set_status("Loading files...")
         announce("Loading files")
         threading.Thread(
@@ -102,8 +108,12 @@ class FilesPanel(wx.Panel):
             wx.CallAfter(self._on_files_loaded, list(files), append)
         except Exception as e:
             log.error("Failed to load files: %s", e)
-            wx.CallAfter(self._set_status, f"Failed to load files: {e}")
-            self._loading = False
+            wx.CallAfter(self._on_files_load_failed, str(e))
+
+    def _on_files_load_failed(self, error_text):
+        self._loading = False
+        self._set_status(f"Failed to load files: {error_text}")
+        self._sync_controls()
 
     def _on_files_loaded(self, files, append):
         self._loading = False
@@ -116,6 +126,7 @@ class FilesPanel(wx.Panel):
         status = f"{count} file{'s' if count != 1 else ''} found"
         self._set_status(status)
         announce(status)
+        self._sync_controls()
 
     def _apply_filter(self):
         query = self.search_ctrl.GetValue().strip().lower()
@@ -133,6 +144,7 @@ class FilesPanel(wx.Panel):
         self.file_list.Thaw()
         if self.file_list.GetCount() > 0:
             self.file_list.SetSelection(0)
+        self._sync_controls()
 
     def _on_search_text(self, event):
         if self._search_timer:
@@ -162,6 +174,7 @@ class FilesPanel(wx.Panel):
         if not self._entity or self._loading:
             return
         self._loading = True
+        self._sync_controls()
         query = self.search_ctrl.GetValue().strip()
         self._set_status("Loading more files...")
         threading.Thread(
@@ -203,6 +216,22 @@ class FilesPanel(wx.Panel):
             args=(msg, save_path),
             daemon=True,
         ).start()
+
+    def _on_file_selected(self, event):
+        self._sync_controls()
+        event.Skip()
+
+    def _sync_controls(self):
+        has_entity = self._entity is not None
+        has_selection = (
+            self.file_list.GetSelection() != wx.NOT_FOUND
+            and self.file_list.GetSelection() < len(self._filtered)
+        )
+
+        self.search_ctrl.Enable(has_entity and not self._loading)
+        self.file_list.Enable(has_entity)
+        self.download_btn.Enable(has_entity and not self._loading and has_selection)
+        self.load_more_btn.Enable(has_entity and not self._loading)
 
     def _download_thread(self, msg, save_path):
         try:

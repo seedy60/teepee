@@ -10,6 +10,9 @@ DEFAULT_CONFIG = {
     "input_device_index": -1,
     "camera_device_index": -1,
     "sounds_enabled": True,
+    "announcements_enabled": False,
+    "announcement_backend": "auto",
+    "announcement_voice_index": -1,
     "sound_pack": "default",
     "time_format": "24h",
 }

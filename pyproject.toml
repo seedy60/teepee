@@ -5,7 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "prismatoid>=0.1.0",
     "cryptg>=0.5.2",
+    "ntgcalls>=2.1.0",
     "opencv-python>=4.13.0.92",
     "pydub>=0.25.1",
     "pyinstaller>=6.19.0",

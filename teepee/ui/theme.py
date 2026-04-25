@@ -3,12 +3,6 @@ import sys
 
 import wx
 
-
-_DARK_BG = wx.Colour(30, 30, 30)
-_DARK_BG_ALT = wx.Colour(45, 45, 45)
-_DARK_FG = wx.Colour(212, 212, 212)
-_DARK_BORDER = wx.Colour(60, 60, 60)
-
 _dark_mode = None
 _high_contrast = None
 
@@ -75,32 +69,44 @@ def apply_theme(window):
     _apply_colors(window)
 
 
+def _system_color(key, fallback):
+    try:
+        return wx.SystemSettings.GetColour(key)
+    except Exception:
+        return fallback
+
+
 def _apply_colors(window):
+    bg = _system_color(wx.SYS_COLOUR_WINDOW, wx.Colour(30, 30, 30))
+    fg = _system_color(wx.SYS_COLOUR_WINDOWTEXT, wx.Colour(212, 212, 212))
+    ctrl_bg = _system_color(wx.SYS_COLOUR_3DFACE, wx.Colour(45, 45, 45))
+    border_bg = _system_color(wx.SYS_COLOUR_BTNFACE, wx.Colour(60, 60, 60))
+
     if isinstance(window, (wx.TextCtrl, wx.ListBox, wx.Choice, wx.SpinCtrl)):
-        window.SetBackgroundColour(_DARK_BG_ALT)
-        window.SetForegroundColour(_DARK_FG)
+        window.SetBackgroundColour(ctrl_bg)
+        window.SetForegroundColour(fg)
     elif isinstance(window, wx.StatusBar):
-        window.SetBackgroundColour(_DARK_BG)
-        window.SetForegroundColour(_DARK_FG)
+        window.SetBackgroundColour(bg)
+        window.SetForegroundColour(fg)
     elif isinstance(window, wx.Button):
-        window.SetBackgroundColour(_DARK_BORDER)
-        window.SetForegroundColour(_DARK_FG)
+        window.SetBackgroundColour(border_bg)
+        window.SetForegroundColour(fg)
     elif isinstance(window, (wx.Panel, wx.Dialog, wx.Frame)):
-        window.SetBackgroundColour(_DARK_BG)
-        window.SetForegroundColour(_DARK_FG)
+        window.SetBackgroundColour(bg)
+        window.SetForegroundColour(fg)
     elif isinstance(window, wx.StaticText):
-        window.SetForegroundColour(_DARK_FG)
-        window.SetBackgroundColour(_DARK_BG)
+        window.SetForegroundColour(fg)
+        window.SetBackgroundColour(bg)
     elif isinstance(window, wx.StaticBox):
-        window.SetForegroundColour(_DARK_FG)
-        window.SetBackgroundColour(_DARK_BG)
+        window.SetForegroundColour(fg)
+        window.SetBackgroundColour(bg)
     elif isinstance(window, wx.CheckBox):
-        window.SetForegroundColour(_DARK_FG)
-        window.SetBackgroundColour(_DARK_BG)
+        window.SetForegroundColour(fg)
+        window.SetBackgroundColour(bg)
     elif isinstance(window, wx.RadioButton):
-        window.SetForegroundColour(_DARK_FG)
-        window.SetBackgroundColour(_DARK_BG)
+        window.SetForegroundColour(fg)
+        window.SetBackgroundColour(bg)
     elif isinstance(window, wx.SplitterWindow):
-        window.SetBackgroundColour(_DARK_BORDER)
+        window.SetBackgroundColour(border_bg)
     for child in window.GetChildren():
         _apply_colors(child)

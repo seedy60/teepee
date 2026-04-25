@@ -1,9 +1,11 @@
-"""Build Teepee with PyInstaller.
+"""Build Teepee (console/unwindowed) with PyInstaller.
 
 Usage:
-    uv run python build.py
+    uv run python build2.py
 
 Produces dist/Teepee.zip containing the one-folder bundle.
+This build keeps a console window open so Python tracebacks and runtime
+diagnostics are visible.
 """
 
 import os
@@ -93,7 +95,7 @@ def main():
         sys.executable, "-m", "PyInstaller",
         "--name", APP_NAME,
         "--onedir",
-        "--windowed",
+        "--console",
         "--noupx" if not find_upx() else f"--upx-dir={find_upx()}",
         "--version-file=vdata.txt",
         # Speed optimisations
