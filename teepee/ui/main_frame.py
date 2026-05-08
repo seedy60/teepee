@@ -2238,6 +2238,7 @@ class MainFrame(wx.Frame):
                 self.config["time_format"] = dlg.GetTimeFormat()
                 self.config["chat_limit"] = dlg.GetChatLimit()
                 self.config["message_limit"] = dlg.GetMessageLimit()
+                self.config["message_template"] = dlg.GetMessageTemplate()
                 self.config.save()
                 self.sound.set_output_device(dlg.GetOutputDeviceIndex())
                 set_announcements_enabled(

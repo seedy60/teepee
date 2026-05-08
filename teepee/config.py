@@ -3,6 +3,9 @@ import os
 from pathlib import Path
 
 
+DEFAULT_MESSAGE_TEMPLATE = "[msg], [user] at [datetime] [seen]"
+
+
 DEFAULT_CONFIG = {
     "api_id": "",
     "api_hash": "",
@@ -15,6 +18,7 @@ DEFAULT_CONFIG = {
     "announcement_voice_index": -1,
     "sound_pack": "default",
     "time_format": "24h",
+    "message_template": DEFAULT_MESSAGE_TEMPLATE,
 }
 
 

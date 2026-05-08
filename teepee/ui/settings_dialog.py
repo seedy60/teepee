@@ -1,6 +1,7 @@
 import threading
 import wx
 
+from ..config import DEFAULT_MESSAGE_TEMPLATE
 from .announce import list_announcement_backends, list_announcement_voices
 from .theme import apply_theme
 
@@ -249,6 +250,46 @@ class SettingsDialog(wx.Dialog):
             self.message_limit_spin, flag=wx.EXPAND | wx.ALL, border=5
         )
 
+        template_help = (
+            "Message Template (placeholders: [user], [msg], [ftype], "
+            "[fname], [fsize], [datetime], [seen]):"
+        )
+        display_box.Add(
+            wx.StaticText(self, label=template_help),
+            flag=wx.LEFT | wx.TOP,
+            border=5,
+        )
+        self.message_template_ctrl = wx.TextCtrl(
+            self,
+            value=config.get("message_template", DEFAULT_MESSAGE_TEMPLATE) or "",
+        )
+        self.message_template_ctrl.SetName("Message Template")
+        self.message_template_ctrl.SetToolTip(
+            "Controls how each message is presented in a chat.\n"
+            "[user] - sender name\n"
+            "[msg] - message content\n"
+            "[ftype] - attachment type (e.g. Photo, Document)\n"
+            "[fname] - attachment file name\n"
+            "[fsize] - attachment file size\n"
+            "[datetime] - time or date the message was sent\n"
+            "[seen] - sent/seen status for outgoing messages"
+        )
+        display_box.Add(
+            self.message_template_ctrl, flag=wx.EXPAND | wx.ALL, border=5
+        )
+
+        self.reset_template_btn = wx.Button(
+            self, label="Reset Template to &Default"
+        )
+        self.reset_template_btn.SetName("Reset Template to Default")
+        self.reset_template_btn.SetToolTip(
+            "Replace the current template with the built-in default"
+        )
+        self.reset_template_btn.Bind(wx.EVT_BUTTON, self._on_reset_template)
+        display_box.Add(
+            self.reset_template_btn, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=5
+        )
+
         sizer.Add(
             display_box,
             flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
@@ -316,6 +357,17 @@ class SettingsDialog(wx.Dialog):
 
     def GetMessageLimit(self):
         return self.message_limit_spin.GetValue()
+
+    def GetMessageTemplate(self):
+        value = self.message_template_ctrl.GetValue()
+        value = (
+            value.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").strip()
+        )
+        return value or DEFAULT_MESSAGE_TEMPLATE
+
+    def _on_reset_template(self, event):
+        self.message_template_ctrl.SetValue(DEFAULT_MESSAGE_TEMPLATE)
+        self.message_template_ctrl.SetFocus()
 
     def _on_test_speaker(self, event):
         from .announce import announce

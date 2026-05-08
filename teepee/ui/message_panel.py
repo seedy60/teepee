@@ -1,9 +1,29 @@
+import re
 from datetime import datetime, timedelta
 
 import wx
 
+from ..config import DEFAULT_MESSAGE_TEMPLATE
 from .theme import apply_theme, is_dark_mode
 from .announce import announce
+
+
+_TEMPLATE_VARS = ("user", "msg", "ftype", "fname", "fsize", "datetime", "seen")
+_TEMPLATE_PATTERN = re.compile(
+    r"\[(" + "|".join(_TEMPLATE_VARS) + r")\]"
+)
+
+
+def _render_template(template, values):
+    """Substitute [var] placeholders in template using the values dict.
+
+    Unknown placeholders are left untouched. Multiple consecutive spaces
+    introduced by empty replacements are collapsed.
+    """
+    rendered = _TEMPLATE_PATTERN.sub(
+        lambda m: values.get(m.group(1), "") or "", template
+    )
+    return re.sub(r" {2,}", " ", rendered).strip()
 
 
 try:
@@ -231,40 +251,123 @@ class MessagePanel(wx.Panel):
         else:
             sender = self._display_name(msg.sender)
 
-        time_str = self._format_message_time(msg.date)
+        reply_prefix = "[Reply] " if msg.reply_to else ""
+        edited_suffix = " (edited)" if getattr(msg, "edit_date", None) else ""
 
-        reply_prefix = ""
-        if msg.reply_to:
-            reply_prefix = "[Reply] "
-
-        edited_suffix = ""
-        if getattr(msg, "edit_date", None):
-            edited_suffix = " (edited)"
-
-        # Read status for outgoing messages
-        status_suffix = ""
+        seen = ""
         if msg.out:
             if self._read_outbox_max_id and msg.id <= self._read_outbox_max_id:
-                status_suffix = ". Seen"
+                seen = "Seen"
             else:
-                status_suffix = ". Sent"
+                seen = "Sent"
 
-        if msg.voice:
-            text = "[Voice message]"
-        elif msg.media and msg.text:
-            label = self._media_label(msg.media)
-            caption = msg.text.replace("\n", " | ")
-            text = f"[{label}] {caption}"
-        elif msg.text:
-            text = msg.text.replace("\n", " | ")
-        elif msg.media:
-            text = f"[{self._media_label(msg.media)}]"
-        elif msg.action:
-            text = self._action_label(msg.action)
+        media_info = self._extract_media_info(msg.media)
+        msg_text = self._compose_msg_text(
+            is_voice=bool(msg.voice),
+            text=msg.text or "",
+            media_info=media_info,
+            action=getattr(msg, "action", None),
+            reply_prefix=reply_prefix,
+            edited_suffix=edited_suffix,
+        )
+
+        return self._render_message(
+            user=sender,
+            msg_text=msg_text,
+            media_info=media_info,
+            dt=msg.date,
+            seen=seen,
+        )
+
+    def append_new_message(self, data):
+        self._show_chat()
+        sender = data["sender_name"]
+
+        reply_prefix = "[Reply] " if data.get("reply_to_msg_id") else ""
+
+        msg = data.get("message")
+        media_info = self._extract_media_info(
+            msg.media if (msg and data.get("is_media")) else None
+        )
+        msg_text = self._compose_msg_text(
+            is_voice=bool(data.get("is_voice")),
+            text=data.get("text", "") or "",
+            media_info=media_info,
+            action=getattr(msg, "action", None) if msg else None,
+            reply_prefix=reply_prefix,
+            edited_suffix="",
+        )
+
+        # Outgoing messages just sent are always "Sent" initially
+        seen = "Sent" if data.get("out") else ""
+
+        rendered = self._render_message(
+            user=sender,
+            msg_text=msg_text,
+            media_info=media_info,
+            dt=data["date"],
+            seen=seen,
+        )
+
+        count = self.messages_list.GetCount()
+        sel = self.messages_list.GetSelection()
+        was_at_end = (count == 0 or sel == wx.NOT_FOUND or sel >= count - 1)
+
+        self.messages_list.Append(rendered)
+
+        if was_at_end:
+            last = self.messages_list.GetCount() - 1
+            self.messages_list.SetSelection(last)
+            self.messages_list.EnsureVisible(last)
+
+    def _render_message(self, *, user, msg_text, media_info, dt, seen):
+        template = (
+            self.frame.config.get("message_template", "")
+            or DEFAULT_MESSAGE_TEMPLATE
+        )
+        values = {
+            "user": user or "",
+            "msg": msg_text or "",
+            "ftype": media_info.get("kind", "") if media_info else "",
+            "fname": media_info.get("filename", "") if media_info else "",
+            "fsize": media_info.get("size", "") if media_info else "",
+            "datetime": self._format_message_time(dt) if dt else "",
+            "seen": seen or "",
+        }
+        return _render_template(template, values)
+
+    def _compose_msg_text(
+        self,
+        *,
+        is_voice,
+        text,
+        media_info,
+        action=None,
+        reply_prefix="",
+        edited_suffix="",
+    ):
+        """Build the [msg] body, preserving prior media + caption layout."""
+        if is_voice:
+            body = "[Voice message]"
         else:
-            text = "[Empty message]"
-
-        return f"{reply_prefix}{text}{edited_suffix}, {sender} at {time_str}{status_suffix}"
+            kind = media_info.get("kind", "") if media_info else ""
+            filename = media_info.get("filename", "") if media_info else ""
+            if kind and filename and kind in ("Audio", "Video", "Picture", "File"):
+                label = f"{kind}: {filename}"
+            else:
+                label = kind
+            caption = text.replace("\n", " | ") if text else ""
+            if caption and label:
+                body = f"[{label}] {caption}"
+            elif caption:
+                body = caption
+            elif label:
+                body = f"[{label}]"
+            elif action is not None:
+                body = self._action_label(action)
+            else:
+                body = "[Empty message]"
+        return f"{reply_prefix}{body}{edited_suffix}"
 
     @staticmethod
     def _action_label(action):
@@ -285,41 +388,90 @@ class MessagePanel(wx.Panel):
         return f"[{labels.get(type_name, 'Service message')}]"
 
     @staticmethod
-    def _media_label(media):
+    def _format_size(size):
+        if not size:
+            return ""
+        if size < 1024:
+            return f"{size} B"
+        if size < 1024 * 1024:
+            return f"{size / 1024:.1f} KB"
+        if size < 1024 * 1024 * 1024:
+            return f"{size / (1024 * 1024):.1f} MB"
+        return f"{size / (1024 * 1024 * 1024):.1f} GB"
+
+    @staticmethod
+    def _extract_media_info(media):
+        """Return a dict with kind/filename/size for a Message.media object."""
+        info = {"kind": "", "filename": "", "size": ""}
+        if not media:
+            return info
         type_name = type(media).__name__
+
         if type_name == "MessageMediaDocument":
             doc = getattr(media, "document", None)
-            if doc:
-                filename = None
-                kind = None
-                for attr in getattr(doc, "attributes", []):
-                    attr_name = type(attr).__name__
-                    if attr_name == "DocumentAttributeFilename":
-                        filename = getattr(attr, "file_name", None)
-                    elif attr_name == "DocumentAttributeAudio":
-                        if getattr(attr, "voice", False):
-                            return "Voice message"
-                        kind = "Audio"
-                    elif attr_name == "DocumentAttributeVideo":
-                        if getattr(attr, "round_message", False):
-                            return "Video message"
-                        kind = "Video"
-                    elif attr_name == "DocumentAttributeSticker":
-                        return "Sticker"
-                    elif attr_name == "DocumentAttributeAnimated":
-                        return "GIF"
-                if kind and filename:
-                    return f"{kind}: {filename}"
-                if kind:
-                    return kind
-                if filename:
-                    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-                    if ext in ("png", "jpg", "jpeg", "bmp", "gif", "webp", "tiff", "tif"):
-                        return f"Picture: {filename}"
-                    return f"File: {filename}"
-            return "Document"
+            if not doc:
+                info["kind"] = "Document"
+                return info
+            doc_size = getattr(doc, "size", None)
+            if doc_size:
+                info["size"] = MessagePanel._format_size(doc_size)
+            filename = None
+            kind = None
+            for attr in getattr(doc, "attributes", []):
+                attr_name = type(attr).__name__
+                if attr_name == "DocumentAttributeFilename":
+                    filename = getattr(attr, "file_name", None)
+                elif attr_name == "DocumentAttributeAudio":
+                    if getattr(attr, "voice", False):
+                        info["kind"] = "Voice message"
+                        return info
+                    kind = "Audio"
+                elif attr_name == "DocumentAttributeVideo":
+                    if getattr(attr, "round_message", False):
+                        info["kind"] = "Video message"
+                        return info
+                    kind = "Video"
+                elif attr_name == "DocumentAttributeSticker":
+                    info["kind"] = "Sticker"
+                    return info
+                elif attr_name == "DocumentAttributeAnimated":
+                    info["kind"] = "GIF"
+                    return info
+            if filename:
+                info["filename"] = filename
+            if kind:
+                info["kind"] = kind
+            elif filename:
+                ext = (
+                    filename.rsplit(".", 1)[-1].lower()
+                    if "." in filename
+                    else ""
+                )
+                if ext in (
+                    "png", "jpg", "jpeg", "bmp",
+                    "gif", "webp", "tiff", "tif",
+                ):
+                    info["kind"] = "Picture"
+                else:
+                    info["kind"] = "File"
+            else:
+                info["kind"] = "Document"
+            return info
+
+        if type_name == "MessageMediaPhoto":
+            info["kind"] = "Photo"
+            photo = getattr(media, "photo", None)
+            sizes = getattr(photo, "sizes", []) if photo else []
+            biggest = 0
+            for s in sizes or []:
+                sval = getattr(s, "size", None) or 0
+                if sval > biggest:
+                    biggest = sval
+            if biggest:
+                info["size"] = MessagePanel._format_size(biggest)
+            return info
+
         labels = {
-            "MessageMediaPhoto": "Photo",
             "MessageMediaContact": "Contact",
             "MessageMediaGeo": "Location",
             "MessageMediaGeoLive": "Live location",
@@ -332,55 +484,8 @@ class MessagePanel(wx.Panel):
             "MessageMediaStory": "Story",
             "MessageMediaUnsupported": "Unsupported media",
         }
-        return labels.get(type_name, "Media")
-
-    def append_new_message(self, data):
-        self._show_chat()
-        sender = data["sender_name"]
-        time_str = self._format_message_time(data["date"])
-
-        reply_prefix = ""
-        if data.get("reply_to_msg_id"):
-            reply_prefix = "[Reply] "
-
-        if data["is_voice"]:
-            text = "[Voice message]"
-        elif data["is_media"] and data["text"]:
-            msg = data.get("message")
-            if msg and msg.media:
-                label = self._media_label(msg.media)
-                caption = data["text"].replace("\n", " | ")
-                text = f"[{label}] {caption}"
-            else:
-                text = data["text"].replace("\n", " | ")
-        elif data["text"]:
-            text = data["text"].replace("\n", " | ")
-        elif data["is_media"]:
-            msg = data.get("message")
-            if msg and msg.media:
-                text = f"[{self._media_label(msg.media)}]"
-            else:
-                text = "[Media]"
-        elif data.get("message") and getattr(data["message"], "action", None):
-            text = self._action_label(data["message"].action)
-        else:
-            text = "[Empty message]"
-
-        count = self.messages_list.GetCount()
-        sel = self.messages_list.GetSelection()
-        was_at_end = (count == 0 or sel == wx.NOT_FOUND or sel >= count - 1)
-
-        # Outgoing messages just sent are always "Sent" initially
-        status_suffix = ". Sent" if data.get("out") else ""
-
-        self.messages_list.Append(
-            f"{reply_prefix}{text}, {sender} at {time_str}{status_suffix}"
-        )
-
-        if was_at_end:
-            last = self.messages_list.GetCount() - 1
-            self.messages_list.SetSelection(last)
-            self.messages_list.EnsureVisible(last)
+        info["kind"] = labels.get(type_name, "Media")
+        return info
 
     def do_send(self):
         text = self.input_ctrl.GetValue().strip()

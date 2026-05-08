@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 import os
 import sys
 from pathlib import Path
@@ -15,12 +16,47 @@ from .ui.theme import apply_theme
 from .updater import cleanup_old_files
 from .voice_manager import VoiceManager
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    stream=sys.stderr,
-)
-logging.getLogger("teepee.call_manager").setLevel(logging.DEBUG)
+
+def setup_logging():
+    if os.name == "nt":
+        base = Path(os.environ.get("APPDATA", str(Path.home())))
+    else:
+        base = Path.home() / ".config"
+    data_dir = base / "Teepee"
+    log_dir = data_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "teepee.log"
+
+    # Root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # Formatter
+    formatter = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+
+    # File handler (5MB rotating logs, 3 backups)
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # Specific levels
+    logging.getLogger("teepee.call_manager").setLevel(logging.DEBUG)
+
+    # Log unhandled exceptions
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logging.error("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = handle_exception
 
 
 class TeepeeApp(wx.App):
@@ -57,6 +93,8 @@ class TeepeeApp(wx.App):
 
 
 def main():
+    setup_logging()
+    logging.info("Starting Teepee...")
     if sys.platform == "win32":
         import ctypes
 
