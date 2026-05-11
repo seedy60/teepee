@@ -72,19 +72,45 @@ def apply_theme(window):
         return
     if isinstance(window, wx.TopLevelWindow):
         apply_dark_title_bar(window)
+        _ensure_titlebar_on_show(window)
     _apply_colors(window)
+
+
+def _ensure_titlebar_on_show(window):
+    if getattr(window, "_teepee_show_bound", False):
+        return
+    window._teepee_show_bound = True
+
+    def _on_show(event):
+        event.Skip()
+        if event.IsShown():
+            apply_dark_title_bar(window)
+
+    window.Bind(wx.EVT_SHOW, _on_show)
+
+
+def _disable_visual_styles(window):
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.uxtheme.SetWindowTheme(window.GetHandle(), "", "")
+    except Exception:
+        pass
 
 
 def _apply_colors(window):
     if isinstance(window, (wx.TextCtrl, wx.ListBox, wx.Choice, wx.SpinCtrl)):
         window.SetBackgroundColour(_DARK_BG_ALT)
         window.SetForegroundColour(_DARK_FG)
+        if isinstance(window, (wx.Choice, wx.SpinCtrl)):
+            _disable_visual_styles(window)
     elif isinstance(window, wx.StatusBar):
         window.SetBackgroundColour(_DARK_BG)
         window.SetForegroundColour(_DARK_FG)
     elif isinstance(window, wx.Button):
         window.SetBackgroundColour(_DARK_BORDER)
         window.SetForegroundColour(_DARK_FG)
+        _disable_visual_styles(window)
     elif isinstance(window, (wx.Panel, wx.Dialog, wx.Frame)):
         window.SetBackgroundColour(_DARK_BG)
         window.SetForegroundColour(_DARK_FG)
@@ -94,12 +120,15 @@ def _apply_colors(window):
     elif isinstance(window, wx.StaticBox):
         window.SetForegroundColour(_DARK_FG)
         window.SetBackgroundColour(_DARK_BG)
+        _disable_visual_styles(window)
     elif isinstance(window, wx.CheckBox):
         window.SetForegroundColour(_DARK_FG)
         window.SetBackgroundColour(_DARK_BG)
+        _disable_visual_styles(window)
     elif isinstance(window, wx.RadioButton):
         window.SetForegroundColour(_DARK_FG)
         window.SetBackgroundColour(_DARK_BG)
+        _disable_visual_styles(window)
     elif isinstance(window, wx.SplitterWindow):
         window.SetBackgroundColour(_DARK_BORDER)
     for child in window.GetChildren():

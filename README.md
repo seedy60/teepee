@@ -1,6 +1,6 @@
 # Teepee
 
-The simple, speedy Telegram client with the blind in mind, developed by Seediffusion.
+The simple, speedy Telegram client with the blind in mind.
 Teepee is a lightweight desktop Telegram client for Windows that puts blind and visually impaired users first. It pairs a graphical user interface (GUI) that is easy to navigate with a keyboard with on-screen elements that are clearly labelled for screen readers such as [NVDA](https://nvaccess.org/about-nvda/) and [JAWS](https://www.freedomscientific.com/products/software/jaws/). Notification sounds, screen reader announcements through Prism, dark mode, and a fully customisable message presentation are also included.
 
 ## Teepee features
