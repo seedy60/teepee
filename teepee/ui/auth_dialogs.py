@@ -236,7 +236,9 @@ class CreateGroupDialog(wx.Dialog):
             label="&Private group",
             style=wx.RB_GROUP,
         )
+        self.private_radio.SetName("Private group")
         self.public_radio = wx.RadioButton(self, label="P&ublic group")
+        self.public_radio.SetName("Public group")
         self.private_radio.SetValue(True)
         sizer.Add(
             self.private_radio,
@@ -358,7 +360,9 @@ class CreateChannelDialog(wx.Dialog):
             label="&Private channel",
             style=wx.RB_GROUP,
         )
+        self.private_radio.SetName("Private channel")
         self.public_radio = wx.RadioButton(self, label="P&ublic channel")
+        self.public_radio.SetName("Public channel")
         self.private_radio.SetValue(True)
         sizer.Add(
             self.private_radio,

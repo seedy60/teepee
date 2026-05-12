@@ -139,6 +139,9 @@ class MessagePanel(wx.Panel):
 
         self.input_ctrl = wx.TextCtrl(self, style=wx.TE_MULTILINE)
         self.input_ctrl.SetName("Message")
+        self.input_ctrl.SetToolTip(
+            "Type a message. Enter to send, Shift+Enter for a new line."
+        )
         self.input_sizer.Add(self.input_ctrl, 1, wx.EXPAND | wx.ALL, 5)
 
         btn_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -160,7 +163,7 @@ class MessagePanel(wx.Panel):
         )
         btn_sizer.Add(self.sticker_btn, 0, wx.ALL, 2)
 
-        self.voice_btn = wx.Button(self, label="&Voice")
+        self.voice_btn = wx.Button(self, label="V&oice")
         self.voice_btn.SetName("Voice")
         self.voice_btn.SetToolTip("Record a voice message")
         btn_sizer.Add(self.voice_btn, 0, wx.ALL, 2)
@@ -545,7 +548,7 @@ class MessagePanel(wx.Panel):
             self.frame.start_voice_recording()
         else:
             self._recording = False
-            self.voice_btn.SetLabel("&Voice")
+            self.voice_btn.SetLabel("V&oice")
             self.voice_btn.SetName("Voice")
             self.voice_btn.SetToolTip("Record a voice message")
             self.frame.SetStatusText("Recording stopped, sending...")
@@ -680,7 +683,10 @@ class MessagePanel(wx.Panel):
                 label = button.text
                 if KeyboardButtonUrl and isinstance(button, KeyboardButtonUrl):
                     label = f"{button.text} (link)"
-                btn = wx.Button(self.buttons_panel, label=label)
+                # Escape stray ampersands so wxPython does not treat them
+                # as mnemonics on a bot-supplied button label.
+                btn_label = label.replace("&", "&&")
+                btn = wx.Button(self.buttons_panel, label=btn_label)
                 btn.SetName(label)
                 btn.SetToolTip(self._button_tooltip(button))
                 if is_dark_mode():

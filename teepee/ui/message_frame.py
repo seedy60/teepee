@@ -110,6 +110,9 @@ class MessageFrame(wx.Frame):
             if key == ord("S"):
                 self.main_frame.save_selected_media()
                 return
+            if key == ord(";"):
+                self.main_frame.show_reply_target_for_selected_message()
+                return
 
         if event.ControlDown() and not event.ShiftDown() and not event.AltDown():
             if key == ord("C"):

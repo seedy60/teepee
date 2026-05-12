@@ -27,6 +27,7 @@ class FilesPanel(wx.Panel):
 
         self.search_ctrl = wx.TextCtrl(self)
         self.search_ctrl.SetName("Search files")
+        self.search_ctrl.SetToolTip("Filter or search for files by name")
         sizer.Add(self.search_ctrl, 0, wx.EXPAND | wx.ALL, 5)
 
         list_label = wx.StaticText(self, label="Files:")
@@ -113,6 +114,7 @@ class FilesPanel(wx.Panel):
     def _on_files_load_failed(self, error_text):
         self._loading = False
         self._set_status(f"Failed to load files: {error_text}")
+        announce(f"Failed to load files: {error_text}")
         self._sync_controls()
 
     def _on_files_loaded(self, files, append):
@@ -248,6 +250,7 @@ class FilesPanel(wx.Panel):
         except Exception as e:
             log.error("Failed to download file: %s", e)
             wx.CallAfter(self._set_status, f"Download failed: {e}")
+            wx.CallAfter(announce, f"Download failed: {e}")
 
     def _set_status(self, text):
         top = self.GetTopLevelParent()

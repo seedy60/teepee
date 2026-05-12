@@ -29,6 +29,7 @@ class ChatListPanel(wx.Panel):
         )
         self.search_ctrl = wx.TextCtrl(self)
         self.search_ctrl.SetName("Search chats")
+        self.search_ctrl.SetToolTip("Filter the chat list by name")
         sizer.Add(self.search_ctrl, flag=wx.EXPAND | wx.ALL, border=5)
 
         sizer.Add(
@@ -160,6 +161,12 @@ class ChatListPanel(wx.Panel):
 
         if new_sel != wx.NOT_FOUND:
             self.list_ctrl.SetSelection(new_sel)
+        elif self.list_ctrl.GetCount() > 0 and prev_idx != wx.NOT_FOUND:
+            # Previous selection (e.g. the deleted chat) is gone; keep the
+            # caret near where it was so screen reader focus has somewhere
+            # to land instead of falling through to the panel root.
+            fallback = min(prev_idx, self.list_ctrl.GetCount() - 1)
+            self.list_ctrl.SetSelection(fallback)
         self.list_ctrl.Thaw()
         self._updating = False
 

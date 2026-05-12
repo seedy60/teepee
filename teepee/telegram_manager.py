@@ -67,6 +67,9 @@ class TelegramManager:
     async def get_messages(self, entity, limit=50):
         return await self.client.get_messages(entity, limit=limit)
 
+    async def get_message_by_id(self, entity, msg_id):
+        return await self.client.get_messages(entity, ids=msg_id)
+
     async def search_files(self, entity, query="", limit=50, offset_id=0):
         from telethon.tl.types import InputMessagesFilterDocument
         return await self.client.get_messages(

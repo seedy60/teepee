@@ -193,12 +193,19 @@ class MemberPermissionsDialog(wx.Dialog):
         )
 
         self.send_messages = wx.CheckBox(self, label="Send &messages")
-        self.send_media = wx.CheckBox(self, label="Send &media")
+        self.send_messages.SetName("Send messages")
+        self.send_media = wx.CheckBox(self, label="Send me&dia")
+        self.send_media.SetName("Send media")
         self.send_stickers = wx.CheckBox(self, label="Send s&tickers")
+        self.send_stickers.SetName("Send stickers")
         self.send_polls = wx.CheckBox(self, label="Send &polls")
+        self.send_polls.SetName("Send polls")
         self.change_info = wx.CheckBox(self, label="Change group &info")
-        self.invite_users = wx.CheckBox(self, label="&Invite users")
-        self.pin_messages = wx.CheckBox(self, label="&Pin messages")
+        self.change_info.SetName("Change group info")
+        self.invite_users = wx.CheckBox(self, label="I&nvite users")
+        self.invite_users.SetName("Invite users")
+        self.pin_messages = wx.CheckBox(self, label="Pin messa&ges")
+        self.pin_messages.SetName("Pin messages")
 
         for checkbox in (
             self.send_messages,
@@ -452,7 +459,7 @@ class MainFrame(wx.Frame):
         self._invite_link_id = wx.NewIdRef()
         group_menu.Append(
             self._invite_link_id,
-            "Generate Invite &Link",
+            "Gener&ate Invite Link",
             "Create and copy an invite link for the selected group or channel",
         )
         group_menu.AppendSeparator()
@@ -899,6 +906,7 @@ class MainFrame(wx.Frame):
         self.message_panel.input_ctrl.SetFocus()
         self._pending_chat_focus = True
         self.SetStatusText(f"Loading messages from {name}...")
+        announce(f"Loading messages from {name}")
         self._load_dialogs()
         self._load_files_if_group(entity)
         threading.Thread(
@@ -927,6 +935,7 @@ class MainFrame(wx.Frame):
         self.message_panel.input_ctrl.SetFocus()
         self._pending_chat_focus = True
         self.SetStatusText(f"Loading messages from {name}...")
+        announce(f"Loading messages from {name}")
         self._load_files_if_group(dialog.entity)
         threading.Thread(
             target=self._load_messages_thread,
@@ -1404,6 +1413,92 @@ class MainFrame(wx.Frame):
         self.SetStatusText(f"Replying to: {preview}")
         self._msg_frame.SetStatusText(f"Replying to: {preview}")
 
+    def show_reply_target_for_selected_message(self):
+        idx = self.message_panel.get_selected_message_index()
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        if idx == wx.NOT_FOUND:
+            wx.MessageBox(
+                "Select a message first.",
+                "Reply Target",
+                wx.OK | wx.ICON_INFORMATION,
+                parent,
+            )
+            return
+        msg_idx = len(self._current_messages) - 1 - idx
+        if msg_idx < 0 or msg_idx >= len(self._current_messages):
+            return
+        msg = self._current_messages[msg_idx]
+        if not msg.reply_to:
+            wx.MessageBox(
+                "This message is not a reply.",
+                "Reply Target",
+                wx.OK | wx.ICON_INFORMATION,
+                parent,
+            )
+            return
+        reply_id = getattr(msg.reply_to, "reply_to_msg_id", None)
+        if not reply_id:
+            wx.MessageBox(
+                "This message replies to a thread or story, not a specific message.",
+                "Reply Target",
+                wx.OK | wx.ICON_INFORMATION,
+                parent,
+            )
+            return
+        for m in self._current_messages:
+            if m.id == reply_id:
+                self._show_reply_target(m)
+                return
+        self.SetStatusText("Fetching original message...")
+        threading.Thread(
+            target=self._fetch_reply_target_thread,
+            args=(self._current_entity, reply_id),
+            daemon=True,
+        ).start()
+
+    def _fetch_reply_target_thread(self, entity, msg_id):
+        try:
+            target = self.tg.submit_wait(
+                self.tg.get_message_by_id(entity, msg_id)
+            )
+            wx.CallAfter(self._on_reply_target_loaded, target)
+        except Exception as e:
+            log.error("Failed to fetch reply target: %s", e)
+            wx.CallAfter(self._on_reply_target_error, str(e))
+
+    def _on_reply_target_loaded(self, target):
+        self.SetStatusText("")
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        if target is None:
+            wx.MessageBox(
+                "The original message could not be found (it may have been deleted).",
+                "Reply Target",
+                wx.OK | wx.ICON_INFORMATION,
+                parent,
+            )
+            return
+        self._show_reply_target(target)
+
+    def _on_reply_target_error(self, err):
+        self.SetStatusText("")
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        wx.MessageBox(
+            f"Could not load the original message:\n{err}",
+            "Reply Target",
+            wx.OK | wx.ICON_WARNING,
+            parent,
+        )
+
+    def _show_reply_target(self, target):
+        text = self.message_panel._format_message_obj(target)
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        wx.MessageBox(
+            text,
+            "Replying to",
+            wx.OK | wx.ICON_INFORMATION,
+            parent,
+        )
+
     def edit_selected_message(self):
         idx = self.message_panel.get_selected_message_index()
         if idx == wx.NOT_FOUND:
@@ -1648,7 +1743,7 @@ class MainFrame(wx.Frame):
         path = self.voice.start_recording()
         if not path:
             self.message_panel._recording = False
-            self.message_panel.voice_btn.SetLabel("&Voice")
+            self.message_panel.voice_btn.SetLabel("V&oice")
             self.message_panel.voice_btn.SetName("Voice")
             self.message_panel.voice_btn.SetToolTip("Record a voice message")
             self.SetStatusText("Recording failed")
@@ -1785,6 +1880,7 @@ class MainFrame(wx.Frame):
                 self._msg_frame.SetStatusText,
                 f"Failed to download {media_type}",
             )
+            wx.CallAfter(announce, f"Failed to download {media_type}")
 
     def _open_video_file(self, path):
         self.SetStatusText("Opening video...")
@@ -2261,107 +2357,7 @@ class MainFrame(wx.Frame):
 
     def _load_account_thread(self):
         try:
-            me = self.tg.submit_wait(self.tg.get_me())
-            full = self.tg.submit_wait(self.tg.get_full_me())
-            account_data = {
-                "first_name": getattr(me, "first_name", "") or "",
-                "last_name": getattr(me, "last_name", "") or "",
-                "username": getattr(me, "username", "") or "",
-                "phone": getattr(me, "phone", "") or "",
-                "bio": getattr(full.full_user, "about", "") or "",
-                "birthday": getattr(full.full_user, "birthday", None),
-            }
-
-            from telethon.tl.types import (
-                InputPrivacyKeyChatInvite,
-                InputPrivacyKeyForwards,
-                InputPrivacyKeyPhoneCall,
-                InputPrivacyKeyPhoneNumber,
-                InputPrivacyKeyProfilePhoto,
-                InputPrivacyKeyStatusTimestamp,
-            )
-
-            privacy_keys = {
-                "privacy_last_seen": InputPrivacyKeyStatusTimestamp(),
-                "privacy_phone": InputPrivacyKeyPhoneNumber(),
-                "privacy_photo": InputPrivacyKeyProfilePhoto(),
-                "privacy_forwards": InputPrivacyKeyForwards(),
-                "privacy_calls": InputPrivacyKeyPhoneCall(),
-                "privacy_groups": InputPrivacyKeyChatInvite(),
-            }
-            try:
-                from telethon.tl.types import InputPrivacyKeyBirthday
-                privacy_keys["privacy_birthday"] = InputPrivacyKeyBirthday()
-            except ImportError:
-                pass
-            for key, tl_key in privacy_keys.items():
-                try:
-                    account_data[key] = self.tg.submit_wait(
-                        self.tg.get_privacy_setting(tl_key)
-                    )
-                except Exception:
-                    account_data[key] = 0
-
-            try:
-                account_data["account_ttl_days"] = self.tg.submit_wait(
-                    self.tg.get_account_ttl()
-                )
-            except Exception:
-                account_data["account_ttl_days"] = 180
-
-            try:
-                password = self.tg.submit_wait(self.tg.get_password_info())
-                account_data["has_2fa"] = getattr(
-                    password, "has_password", False
-                )
-            except Exception:
-                account_data["has_2fa"] = False
-
-            try:
-                photos = self.tg.submit_wait(
-                    self.tg.get_profile_photos()
-                )
-                account_data["photo_count"] = len(photos)
-                account_data["photos"] = photos
-            except Exception:
-                account_data["photo_count"] = 0
-                account_data["photos"] = []
-
-            try:
-                from datetime import datetime, timezone
-
-                auths = self.tg.submit_wait(self.tg.get_authorizations())
-                sessions = []
-                for auth in auths.authorizations:
-                    display = auth.app_name or "Unknown app"
-                    if auth.app_version:
-                        display += f" {auth.app_version}"
-                    display += f" on {auth.device_model or 'Unknown device'}"
-                    if auth.country:
-                        display += f", {auth.country}"
-                    date_active = auth.date_active
-                    if isinstance(date_active, int):
-                        date_active = datetime.fromtimestamp(
-                            date_active, tz=timezone.utc
-                        )
-                    if date_active:
-                        local_str = date_active.astimezone().strftime(
-                            "%d %b %Y %H:%M"
-                        )
-                        display += f", active {local_str}"
-                    if auth.current:
-                        display += " (current session)"
-                    sessions.append(
-                        {
-                            "display": display,
-                            "hash": auth.hash,
-                            "current": bool(auth.current),
-                        }
-                    )
-                account_data["sessions"] = sessions
-            except Exception:
-                account_data["sessions"] = []
-
+            account_data = self.tg.submit_wait(self._gather_account_data())
             wx.CallAfter(self._show_account_dialog, account_data)
         except Exception as e:
             log.error("Failed to load account data: %s", e)
@@ -2369,6 +2365,101 @@ class MainFrame(wx.Frame):
                 self._show_error, f"Failed to load account:\n{e}"
             )
             wx.CallAfter(self.SetStatusText, "Ready")
+
+    async def _gather_account_data(self):
+        import asyncio
+        from telethon.tl.types import (
+            InputPrivacyKeyChatInvite,
+            InputPrivacyKeyForwards,
+            InputPrivacyKeyPhoneCall,
+            InputPrivacyKeyPhoneNumber,
+            InputPrivacyKeyProfilePhoto,
+            InputPrivacyKeyStatusTimestamp,
+        )
+
+        privacy_keys = [
+            ("privacy_last_seen", InputPrivacyKeyStatusTimestamp()),
+            ("privacy_phone", InputPrivacyKeyPhoneNumber()),
+            ("privacy_photo", InputPrivacyKeyProfilePhoto()),
+            ("privacy_forwards", InputPrivacyKeyForwards()),
+            ("privacy_calls", InputPrivacyKeyPhoneCall()),
+            ("privacy_groups", InputPrivacyKeyChatInvite()),
+        ]
+        try:
+            from telethon.tl.types import InputPrivacyKeyBirthday
+            privacy_keys.append(("privacy_birthday", InputPrivacyKeyBirthday()))
+        except ImportError:
+            pass
+
+        async def _safe(awaitable, default):
+            try:
+                return await awaitable
+            except Exception:
+                return default
+
+        results = await asyncio.gather(
+            self.tg.get_me(),
+            self.tg.get_full_me(),
+            *[_safe(self.tg.get_privacy_setting(k), 0) for _, k in privacy_keys],
+            _safe(self.tg.get_account_ttl(), 180),
+            _safe(self.tg.get_password_info(), None),
+            _safe(self.tg.get_profile_photos(), []),
+            _safe(self.tg.get_authorizations(), None),
+        )
+
+        me = results[0]
+        full = results[1]
+        privacy_values = results[2:2 + len(privacy_keys)]
+        base = 2 + len(privacy_keys)
+        ttl_days, password, photos, auths = results[base:base + 4]
+
+        account_data = {
+            "first_name": getattr(me, "first_name", "") or "",
+            "last_name": getattr(me, "last_name", "") or "",
+            "username": getattr(me, "username", "") or "",
+            "phone": getattr(me, "phone", "") or "",
+            "bio": getattr(full.full_user, "about", "") or "",
+            "birthday": getattr(full.full_user, "birthday", None),
+        }
+        for (name, _), value in zip(privacy_keys, privacy_values):
+            account_data[name] = value
+        account_data["account_ttl_days"] = ttl_days if ttl_days is not None else 180
+        account_data["has_2fa"] = getattr(password, "has_password", False) if password else False
+        account_data["photo_count"] = len(photos)
+        account_data["photos"] = photos
+
+        sessions = []
+        if auths is not None:
+            from datetime import datetime, timezone
+            for auth in auths.authorizations:
+                display = auth.app_name or "Unknown app"
+                if auth.app_version:
+                    display += f" {auth.app_version}"
+                display += f" on {auth.device_model or 'Unknown device'}"
+                if auth.country:
+                    display += f", {auth.country}"
+                date_active = auth.date_active
+                if isinstance(date_active, int):
+                    date_active = datetime.fromtimestamp(
+                        date_active, tz=timezone.utc
+                    )
+                if date_active:
+                    local_str = date_active.astimezone().strftime(
+                        "%d %b %Y %H:%M"
+                    )
+                    display += f", active {local_str}"
+                if auth.current:
+                    display += " (current session)"
+                sessions.append(
+                    {
+                        "display": display,
+                        "hash": auth.hash,
+                        "current": bool(auth.current),
+                    }
+                )
+        account_data["sessions"] = sessions
+
+        return account_data
 
     def _show_account_dialog(self, account_data):
         from .account_dialog import AccountDialog
@@ -3285,12 +3376,23 @@ class MainFrame(wx.Frame):
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
         role_btn = wx.Button(dlg, label="&Role...")
+        role_btn.SetName("Role")
+        role_btn.SetToolTip("Change the selected member's role")
         permissions_btn = wx.Button(dlg, label="&Permissions...")
+        permissions_btn.SetName("Permissions")
         kick_btn = wx.Button(dlg, label="&Kick")
+        kick_btn.SetName("Kick")
+        kick_btn.SetToolTip("Remove the selected member from this group")
         close_btn = wx.Button(dlg, wx.ID_CLOSE, "&Close")
+        close_btn.SetName("Close")
+        close_btn.SetToolTip("Close the members list")
         if not permissions_supported:
             permissions_btn.SetToolTip(
                 "Per-member permissions are available only in channels and supergroups"
+            )
+        else:
+            permissions_btn.SetToolTip(
+                "Edit the selected member's per-action permissions"
             )
         actions.Add(role_btn, 0, wx.RIGHT, 8)
         actions.Add(permissions_btn, 0, wx.RIGHT, 8)
@@ -3746,6 +3848,7 @@ class MainFrame(wx.Frame):
             "  Enter: Open selected chat (in chat list) or send message (in input field)\n"
             "  Shift+Enter: New line in message\n"
             "  Ctrl+R: Reply to selected message\n"
+            "  Ctrl+Shift+;: Show the message this reply is replying to\n"
             "  Ctrl+E: Edit selected sent message\n"
             "  Ctrl+C: Copy selected message to clipboard (in message list)\n"
             "  Ctrl+Shift+A: Attach and send a file (you can add a caption)\n"
@@ -3813,6 +3916,7 @@ class MainFrame(wx.Frame):
         if self._msg_frame_was_shown:
             self._msg_frame.Hide()
         self.Hide()
+        announce("Teepee minimized to system tray")
         try:
             self._tray_icon.ShowBalloon(
                 "Teepee",

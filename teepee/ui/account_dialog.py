@@ -500,7 +500,10 @@ class AccountDialog(wx.Dialog):
             self.sessions_list.SetSelection(new_sel)
             self.sessions_list.SetFocus()
         else:
-            self.terminate_btn.SetFocus()
+            # No sessions left; terminate_btn will be disabled, so park
+            # focus on the (still-focusable) sessions list itself rather
+            # than a disabled button.
+            self.sessions_list.SetFocus()
         self._sync_session_controls()
 
     def _on_session_selected(self, event):
