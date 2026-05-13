@@ -596,6 +596,24 @@ class TelegramManager:
 
         return await self.client(GetPasswordRequest())
 
+    async def set_password(
+        self,
+        current_password=None,
+        new_password=None,
+        hint="",
+        email=None,
+        email_code_callback=None,
+    ):
+        kwargs = {
+            "current_password": current_password,
+            "new_password": new_password,
+            "hint": hint or "",
+        }
+        if email:
+            kwargs["email"] = email
+            kwargs["email_code_callback"] = email_code_callback
+        return await self.client.edit_2fa(**kwargs)
+
     async def set_birthday(self, day, month, year=None):
         from telethon.tl.functions.account import UpdateBirthdayRequest
         from telethon.tl.types import Birthday

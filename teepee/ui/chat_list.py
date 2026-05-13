@@ -184,6 +184,16 @@ class ChatListPanel(wx.Panel):
                 return True
         return False
 
+    def remove_chat(self, entity_id):
+        if entity_id is None:
+            return False
+        for dialog in self._dialogs:
+            if getattr(dialog.entity, "id", None) == entity_id:
+                self._dialogs.remove(dialog)
+                self._apply_filter()
+                return True
+        return False
+
     def _on_list_key(self, event):
         if event.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
             self._open_selected()

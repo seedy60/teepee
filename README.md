@@ -73,7 +73,7 @@ Once signed in, you will land on the chat list, which shows your conversations w
 2. Type your message in the message input field at the bottom of the message window.
 3. Press Enter to send, or Shift + Enter to add a new line.
 
-To reply to a message, select it in the message list and press Control + R. To edit one of your own sent text messages, press Control + E. To copy a message to the clipboard, press Control + C while the message list is focused. To delete a message or chat, press Delete and choose whether to delete it for yourself only or for everyone.
+To reply to a message, select it in the message list and press Control + R. To see which message a reply is pointing to, select the reply and press Control + Shift + Semicolon; Teepee will read the original out in a dialog, fetching it from Telegram if it is older than the messages currently loaded. To edit one of your own sent text messages, press Control + E. To copy a message to the clipboard, press Control + C while the message list is focused. To delete a message or chat, press Delete and choose whether to delete it for yourself only or for everyone.
 
 If a message contains a link, an Open Link button appears in the message actions. Press it to open the URL in your default browser. If a message contains more than one link, a list dialog lets you choose which one to open.
 
@@ -127,7 +127,7 @@ Open File then My Account to view and edit your full Telegram account. The dialo
 
 * Profile: edit your first name, last name, username, and bio. Phone number is displayed as a read-only field. Set or clear your birthday with an optional year. Upload a new profile photo or delete your current one.
 * Privacy: choose who can see your last seen, phone number, profile photo, forwarded messages, calls, group invites, and birthday (everyone, contacts only, or nobody).
-* Security: view your two-factor authentication status, see all active sessions, and terminate any session remotely.
+* Security: view your two-factor authentication status. Set up a 2FA password if you don't already have one, change an existing password, or disable 2FA entirely; each option opens a sub-dialog that asks for the password fields it needs and an optional hint. You can also supply a recovery email when setting up or changing the password; Telegram will send a verification code to that address that Teepee will prompt you for in a follow-up dialog. The Security tab also lists all your active sessions and lets you terminate any one of them remotely.
 * Account: set the self-destruct timer for your account (1, 3, 6, or 12 months of inactivity before automatic deletion).
 
 ## Group management
@@ -218,6 +218,7 @@ The following table lists the keyboard shortcuts that work throughout Teepee. Yo
 | Enter | Send message (when in the input field) |
 | Shift + Enter | New line in message |
 | Control + R | Reply to selected message |
+| Control + Shift + Semicolon | Show the message a reply is replying to |
 | Control + E | Edit selected sent message |
 | Control + C | Copy selected message to clipboard (in message list) |
 | Control + Shift + A | Attach and send a file |

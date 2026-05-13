@@ -28,6 +28,29 @@ from .announce import (
 log = logging.getLogger(__name__)
 
 
+def _normalize_peer_id(peer_id):
+    """Convert a telethon event.chat_id (signed) to the bare positive entity
+    id used by entity.id and the local muted/dialog tables.
+
+    Telethon marks channels/supergroups with a -100 prefix
+    (e.g. -1001234567890) and legacy groups with a plain negative
+    (e.g. -1234567890). entity.id is always the positive bare value.
+    """
+    if peer_id is None or peer_id >= 0:
+        return peer_id
+    try:
+        from telethon.utils import resolve_id
+        return resolve_id(peer_id)[0]
+    except Exception:
+        s = str(peer_id).lstrip("-")
+        if s.startswith("100") and len(s) > 3:
+            s = s[3:]
+        try:
+            return int(s)
+        except ValueError:
+            return peer_id
+
+
 class DeleteScopeDialog(wx.Dialog):
     def __init__(self, parent, title, message):
         super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE)
@@ -310,6 +333,7 @@ class MainFrame(wx.Frame):
         self._shown_msg_ids = set()
         self._muted_chats = {}
         self._blocked_users = set()
+        self._recently_deleted_ids = set()
         self._pending_chat_focus = False
         self._media_cache = {}
         self._ringing_stream = None
@@ -835,6 +859,11 @@ class MainFrame(wx.Frame):
             wx.CallAfter(announce, f"Failed to load chats: {e}")
 
     def _on_dialogs_loaded(self, dialogs):
+        if self._recently_deleted_ids:
+            dialogs = [
+                d for d in dialogs
+                if getattr(d.entity, "id", None) not in self._recently_deleted_ids
+            ]
         self._dialogs = list(dialogs)
         self._update_muted_chats()
         self.chat_list.set_dialogs(self._dialogs, set(self._muted_chats.keys()))
@@ -888,6 +917,7 @@ class MainFrame(wx.Frame):
 
     def _on_new_chat_resolved(self, entity):
         self._current_entity = entity
+        self._recently_deleted_ids.discard(getattr(entity, "id", None))
         self._current_messages = []
         self._shown_msg_ids.clear()
         self.message_panel.clear_reply()
@@ -1587,7 +1617,7 @@ class MainFrame(wx.Frame):
 
     def _on_remote_message_edited(self, data):
         msg = data.get("message")
-        chat_id = data.get("chat_id")
+        chat_id = _normalize_peer_id(data.get("chat_id"))
         if not msg:
             return
         # Update the message in the open chat if it matches
@@ -1606,7 +1636,7 @@ class MainFrame(wx.Frame):
         )
 
     def _on_outbox_read(self, data):
-        chat_id = data.get("chat_id")
+        chat_id = _normalize_peer_id(data.get("chat_id"))
         max_id = data.get("max_id", 0)
         if not self._current_entity:
             return
@@ -1722,6 +1752,11 @@ class MainFrame(wx.Frame):
     def _on_chat_deleted(self, entity):
         current_id = getattr(self._current_entity, "id", None)
         deleted_id = getattr(entity, "id", None)
+        if deleted_id is not None:
+            # Defend against a stale in-flight dialog reload re-adding the
+            # chat. Cleared when a new message later arrives for this id, so
+            # genuine new traffic still re-creates the chat in the list.
+            self._recently_deleted_ids.add(deleted_id)
         if current_id and current_id == deleted_id:
             self._current_entity = None
             self._current_messages = []
@@ -1731,7 +1766,9 @@ class MainFrame(wx.Frame):
             self.message_panel.set_enabled(False)
             self.message_panel.messages_list.Clear()
             self._msg_frame.Hide()
+        self.chat_list.remove_chat(deleted_id)
         self.SetStatusText("Chat deleted")
+        announce("Chat deleted")
         announce("Chat deleted")
         self._load_dialogs()
         self.Raise()
@@ -1995,15 +2032,9 @@ class MainFrame(wx.Frame):
     # --------------------------------------------------- Real-time events
 
     def _on_incoming_message(self, data):
-        chat_id = data.get("chat_id")
-        # Telethon event.chat_id is negative for groups/channels (e.g.
-        # -1001234567890) but entity.id stored in _muted_chats is always
-        # positive.  Strip the -100 prefix so the mute lookup matches.
-        if chat_id and chat_id < 0:
-            positive_id = int(str(chat_id).lstrip("-").removeprefix("100"))
-            muted = self._is_chat_muted(chat_id) or self._is_chat_muted(positive_id)
-        else:
-            muted = self._is_chat_muted(chat_id)
+        chat_id = _normalize_peer_id(data.get("chat_id"))
+        self._recently_deleted_ids.discard(chat_id)
+        muted = self._is_chat_muted(chat_id)
         if not muted:
             is_reply = bool(data.get("reply_to_msg_id"))
             if data.get("is_group"):
@@ -2044,7 +2075,7 @@ class MainFrame(wx.Frame):
                     pass
         if self._current_entity:
             current_id = getattr(self._current_entity, "id", None)
-            if current_id and data["chat_id"] == current_id:
+            if current_id and chat_id == current_id:
                 msg = data.get("message")
                 if msg:
                     self._current_messages.insert(0, msg)
@@ -2060,7 +2091,6 @@ class MainFrame(wx.Frame):
                 ).start()
                 return
         msg = data.get("message")
-        chat_id = data.get("chat_id")
         if not msg or not self.chat_list.update_chat_preview(chat_id, msg):
             self._load_dialogs()
 
@@ -2077,15 +2107,15 @@ class MainFrame(wx.Frame):
         msg = data.get("message")
         if msg and msg.id in self._shown_msg_ids:
             return
+        chat_id = _normalize_peer_id(data.get("chat_id"))
+        self._recently_deleted_ids.discard(chat_id)
         if self._current_entity:
             current_id = getattr(self._current_entity, "id", None)
-            if current_id and data["chat_id"] == current_id:
+            if current_id and chat_id == current_id:
                 if msg:
                     self._current_messages.insert(0, msg)
                 self.message_panel.append_new_message(data)
                 self.on_message_selected()
-        msg = data.get("message")
-        chat_id = data.get("chat_id")
         if msg:
             self.chat_list.update_chat_preview(
                 chat_id, msg, increment_unread=False

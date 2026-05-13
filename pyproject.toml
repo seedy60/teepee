@@ -15,6 +15,7 @@ dependencies = [
     "sound-lib",
     "telethon>=1.42.0",
     "wxpython>=4.2.5",
+    "py-tgcalls>=2.2.11",
 ]
 
 [tool.uv.sources]

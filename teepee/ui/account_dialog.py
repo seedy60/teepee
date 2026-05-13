@@ -1,9 +1,372 @@
 import os
+import threading
 from datetime import datetime as _dt
 
 import wx
 
 from .theme import apply_theme
+
+
+class _TFASetupDialog(wx.Dialog):
+    def __init__(self, parent):
+        super().__init__(
+            parent,
+            title="Set Up Two-factor Authentication",
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(
+            wx.StaticText(
+                self,
+                label=(
+                    "Choose a password. You will need to enter it when\n"
+                    "logging in to Telegram on new devices."
+                ),
+            ),
+            flag=wx.ALL,
+            border=10,
+        )
+        sizer.Add(
+            wx.StaticText(self, label="New Password:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.new_ctrl = wx.TextCtrl(self, style=wx.TE_PASSWORD)
+        self.new_ctrl.SetName("New Password")
+        sizer.Add(self.new_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+
+        sizer.Add(
+            wx.StaticText(self, label="Confirm New Password:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.confirm_ctrl = wx.TextCtrl(self, style=wx.TE_PASSWORD)
+        self.confirm_ctrl.SetName("Confirm New Password")
+        sizer.Add(self.confirm_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+
+        sizer.Add(
+            wx.StaticText(self, label="Hint (optional):"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.hint_ctrl = wx.TextCtrl(self)
+        self.hint_ctrl.SetName("Password Hint")
+        self.hint_ctrl.SetToolTip(
+            "A reminder shown when you need to enter your password. "
+            "Do not put your password in the hint."
+        )
+        sizer.Add(self.hint_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+
+        sizer.Add(
+            wx.StaticText(self, label="Recovery email (optional):"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.email_ctrl = wx.TextCtrl(self)
+        self.email_ctrl.SetName("Recovery Email")
+        self.email_ctrl.SetToolTip(
+            "If you forget your password, you can recover access using this email. "
+            "Telegram will send a code you need to enter once to confirm the address."
+        )
+        sizer.Add(self.email_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+
+        btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        self.SetSizerAndFit(sizer)
+        self.SetMinSize((400, -1))
+        self.CenterOnParent()
+        self.new_ctrl.SetFocus()
+        self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        apply_theme(self)
+
+    def _on_ok(self, event):
+        new = self.new_ctrl.GetValue()
+        confirm = self.confirm_ctrl.GetValue()
+        if not new:
+            wx.MessageBox(
+                "Enter a new password.",
+                "Set Up Two-factor Authentication",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            self.new_ctrl.SetFocus()
+            return
+        if new != confirm:
+            wx.MessageBox(
+                "The passwords do not match.",
+                "Set Up Two-factor Authentication",
+                wx.OK | wx.ICON_WARNING,
+                self,
+            )
+            self.confirm_ctrl.SetValue("")
+            self.confirm_ctrl.SetFocus()
+            return
+        email = self.email_ctrl.GetValue().strip()
+        if email and "@" not in email:
+            wx.MessageBox(
+                "Enter a valid recovery email, or leave the field blank.",
+                "Set Up Two-factor Authentication",
+                wx.OK | wx.ICON_WARNING,
+                self,
+            )
+            self.email_ctrl.SetFocus()
+            return
+        event.Skip()
+
+    def GetNewPassword(self):
+        return self.new_ctrl.GetValue()
+
+    def GetHint(self):
+        return self.hint_ctrl.GetValue().strip()
+
+    def GetEmail(self):
+        return self.email_ctrl.GetValue().strip()
+
+
+class _TFAChangeDialog(wx.Dialog):
+    def __init__(self, parent):
+        super().__init__(
+            parent,
+            title="Change Two-factor Authentication Password",
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(
+            wx.StaticText(self, label="Current Password:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.current_ctrl = wx.TextCtrl(self, style=wx.TE_PASSWORD)
+        self.current_ctrl.SetName("Current Password")
+        sizer.Add(
+            self.current_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10
+        )
+
+        sizer.Add(
+            wx.StaticText(self, label="New Password:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.new_ctrl = wx.TextCtrl(self, style=wx.TE_PASSWORD)
+        self.new_ctrl.SetName("New Password")
+        sizer.Add(self.new_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+
+        sizer.Add(
+            wx.StaticText(self, label="Confirm New Password:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.confirm_ctrl = wx.TextCtrl(self, style=wx.TE_PASSWORD)
+        self.confirm_ctrl.SetName("Confirm New Password")
+        sizer.Add(
+            self.confirm_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10
+        )
+
+        sizer.Add(
+            wx.StaticText(self, label="Hint (optional):"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.hint_ctrl = wx.TextCtrl(self)
+        self.hint_ctrl.SetName("Password Hint")
+        self.hint_ctrl.SetToolTip(
+            "A reminder shown when you need to enter your password. "
+            "Do not put your password in the hint."
+        )
+        sizer.Add(self.hint_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+
+        sizer.Add(
+            wx.StaticText(self, label="Update recovery email (optional):"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.email_ctrl = wx.TextCtrl(self)
+        self.email_ctrl.SetName("Recovery Email")
+        self.email_ctrl.SetToolTip(
+            "Leave blank to keep your current recovery email. Enter a new email "
+            "address to replace it; Telegram will send a code you must enter once."
+        )
+        sizer.Add(self.email_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10)
+
+        btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        self.SetSizerAndFit(sizer)
+        self.SetMinSize((400, -1))
+        self.CenterOnParent()
+        self.current_ctrl.SetFocus()
+        self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        apply_theme(self)
+
+    def _on_ok(self, event):
+        if not self.current_ctrl.GetValue():
+            wx.MessageBox(
+                "Enter your current password.",
+                "Change Password",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            self.current_ctrl.SetFocus()
+            return
+        new = self.new_ctrl.GetValue()
+        confirm = self.confirm_ctrl.GetValue()
+        if not new:
+            wx.MessageBox(
+                "Enter a new password.",
+                "Change Password",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            self.new_ctrl.SetFocus()
+            return
+        if new != confirm:
+            wx.MessageBox(
+                "The new passwords do not match.",
+                "Change Password",
+                wx.OK | wx.ICON_WARNING,
+                self,
+            )
+            self.confirm_ctrl.SetValue("")
+            self.confirm_ctrl.SetFocus()
+            return
+        email = self.email_ctrl.GetValue().strip()
+        if email and "@" not in email:
+            wx.MessageBox(
+                "Enter a valid recovery email, or leave the field blank.",
+                "Change Password",
+                wx.OK | wx.ICON_WARNING,
+                self,
+            )
+            self.email_ctrl.SetFocus()
+            return
+        event.Skip()
+
+    def GetCurrentPassword(self):
+        return self.current_ctrl.GetValue()
+
+    def GetNewPassword(self):
+        return self.new_ctrl.GetValue()
+
+    def GetHint(self):
+        return self.hint_ctrl.GetValue().strip()
+
+    def GetEmail(self):
+        return self.email_ctrl.GetValue().strip()
+
+
+class _EmailCodeDialog(wx.Dialog):
+    def __init__(self, parent, code_length):
+        super().__init__(
+            parent,
+            title="Confirm Recovery Email",
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        if code_length and code_length > 0:
+            msg = (
+                f"Telegram has sent a {code_length}-digit verification code\n"
+                "to your recovery email. Enter it below to confirm the\n"
+                "address."
+            )
+        else:
+            msg = (
+                "Telegram has sent a verification code to your recovery\n"
+                "email. Enter it below to confirm the address."
+            )
+        sizer.Add(wx.StaticText(self, label=msg), flag=wx.ALL, border=10)
+
+        sizer.Add(
+            wx.StaticText(self, label="Verification Code:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.code_ctrl = wx.TextCtrl(self)
+        self.code_ctrl.SetName("Verification Code")
+        sizer.Add(
+            self.code_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10
+        )
+
+        btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        self.SetSizerAndFit(sizer)
+        self.SetMinSize((360, -1))
+        self.CenterOnParent()
+        self.code_ctrl.SetFocus()
+        self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        apply_theme(self)
+
+    def _on_ok(self, event):
+        if not self.code_ctrl.GetValue().strip():
+            wx.MessageBox(
+                "Enter the verification code from your email.",
+                "Confirm Recovery Email",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            self.code_ctrl.SetFocus()
+            return
+        event.Skip()
+
+    def GetCode(self):
+        return self.code_ctrl.GetValue().strip()
+
+
+class _TFADisableDialog(wx.Dialog):
+    def __init__(self, parent):
+        super().__init__(
+            parent,
+            title="Disable Two-factor Authentication",
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(
+            wx.StaticText(
+                self,
+                label=(
+                    "Enter your current password to disable\n"
+                    "two-factor authentication."
+                ),
+            ),
+            flag=wx.ALL,
+            border=10,
+        )
+        sizer.Add(
+            wx.StaticText(self, label="Current Password:"),
+            flag=wx.LEFT | wx.TOP,
+            border=10,
+        )
+        self.current_ctrl = wx.TextCtrl(self, style=wx.TE_PASSWORD)
+        self.current_ctrl.SetName("Current Password")
+        sizer.Add(
+            self.current_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10
+        )
+
+        btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        self.SetSizerAndFit(sizer)
+        self.SetMinSize((360, -1))
+        self.CenterOnParent()
+        self.current_ctrl.SetFocus()
+        self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        apply_theme(self)
+
+    def _on_ok(self, event):
+        if not self.current_ctrl.GetValue():
+            wx.MessageBox(
+                "Enter your current password.",
+                "Disable Two-factor Authentication",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            self.current_ctrl.SetFocus()
+            return
+        event.Skip()
+
+    def GetCurrentPassword(self):
+        return self.current_ctrl.GetValue()
 
 
 class AccountDialog(wx.Dialog):
@@ -323,14 +686,51 @@ class AccountDialog(wx.Dialog):
             flag=wx.LEFT | wx.TOP,
             border=10,
         )
-        status_text = "Enabled" if d.get("has_2fa") else "Disabled"
-        tfa_ctrl = wx.TextCtrl(
-            panel, value=status_text, style=wx.TE_READONLY
+        self._tfa_status_ctrl = wx.TextCtrl(
+            panel,
+            value=("Enabled" if d.get("has_2fa") else "Disabled"),
+            style=wx.TE_READONLY,
         )
-        tfa_ctrl.SetName("Two-factor authentication")
+        self._tfa_status_ctrl.SetName("Two-factor authentication status")
         sizer.Add(
-            tfa_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=10
+            self._tfa_status_ctrl,
+            flag=wx.EXPAND | wx.LEFT | wx.RIGHT,
+            border=10,
         )
+
+        tfa_btn_row = wx.BoxSizer(wx.HORIZONTAL)
+        self._setup_2fa_btn = wx.Button(
+            panel, label="&Set Up Two-factor Authentication..."
+        )
+        self._setup_2fa_btn.SetName("Set Up Two-factor Authentication")
+        self._setup_2fa_btn.SetToolTip(
+            "Choose a password that protects logins on new devices"
+        )
+        self._setup_2fa_btn.Bind(wx.EVT_BUTTON, self._on_setup_2fa)
+        tfa_btn_row.Add(self._setup_2fa_btn, 0, wx.RIGHT, 5)
+
+        self._change_2fa_btn = wx.Button(panel, label="&Change Password...")
+        self._change_2fa_btn.SetName("Change Two-factor Authentication Password")
+        self._change_2fa_btn.SetToolTip(
+            "Change your existing two-factor authentication password"
+        )
+        self._change_2fa_btn.Bind(wx.EVT_BUTTON, self._on_change_2fa)
+        tfa_btn_row.Add(self._change_2fa_btn, 0, wx.RIGHT, 5)
+
+        self._disable_2fa_btn = wx.Button(
+            panel, label="&Disable Two-factor Authentication..."
+        )
+        self._disable_2fa_btn.SetName("Disable Two-factor Authentication")
+        self._disable_2fa_btn.SetToolTip(
+            "Remove your two-factor authentication password"
+        )
+        self._disable_2fa_btn.Bind(wx.EVT_BUTTON, self._on_disable_2fa)
+        tfa_btn_row.Add(self._disable_2fa_btn, 0)
+
+        sizer.Add(
+            tfa_btn_row, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=10
+        )
+        self._update_tfa_buttons()
 
         sizer.Add(
             wx.StaticText(panel, label="Active sessions:"),
@@ -509,6 +909,194 @@ class AccountDialog(wx.Dialog):
     def _on_session_selected(self, event):
         self._sync_session_controls()
         event.Skip()
+
+    # ---------------------------------------------- Two-factor authentication
+
+    def _update_tfa_buttons(self):
+        enabled = bool(self._account_data.get("has_2fa"))
+        self._setup_2fa_btn.Show(not enabled)
+        self._change_2fa_btn.Show(enabled)
+        self._disable_2fa_btn.Show(enabled)
+        self._setup_2fa_btn.GetContainingSizer().Layout()
+
+    def _set_tfa_buttons_enabled(self, enabled):
+        for btn in (
+            self._setup_2fa_btn,
+            self._change_2fa_btn,
+            self._disable_2fa_btn,
+        ):
+            btn.Enable(enabled)
+
+    def _on_setup_2fa(self, event):
+        with _TFASetupDialog(self) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            new_password = dlg.GetNewPassword()
+            hint = dlg.GetHint()
+            email = dlg.GetEmail()
+        self._run_2fa_change(
+            action="setup",
+            current=None,
+            new_password=new_password,
+            hint=hint,
+            email=email,
+        )
+
+    def _on_change_2fa(self, event):
+        with _TFAChangeDialog(self) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            current = dlg.GetCurrentPassword()
+            new_password = dlg.GetNewPassword()
+            hint = dlg.GetHint()
+            email = dlg.GetEmail()
+        self._run_2fa_change(
+            action="change",
+            current=current,
+            new_password=new_password,
+            hint=hint,
+            email=email,
+        )
+
+    def _on_disable_2fa(self, event):
+        with _TFADisableDialog(self) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            current = dlg.GetCurrentPassword()
+        if (
+            wx.MessageBox(
+                "Disable two-factor authentication?",
+                "Confirm Disable",
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+                self,
+            )
+            != wx.YES
+        ):
+            return
+        self._run_2fa_change(
+            action="disable",
+            current=current,
+            new_password=None,
+            hint="",
+            email=None,
+        )
+
+    def _run_2fa_change(self, action, current, new_password, hint, email=None):
+        self._set_tfa_buttons_enabled(False)
+        self._tfa_status_ctrl.SetValue("Working...")
+        from .announce import announce
+        announce("Updating two-factor authentication")
+        threading.Thread(
+            target=self._tfa_change_thread,
+            args=(action, current, new_password, hint, email),
+            daemon=True,
+        ).start()
+
+    def _prompt_email_code(self, code_length):
+        """Run the email-code dialog on the wx UI thread and block this
+        thread until the user submits or cancels. Returns the code string,
+        or empty string on cancel."""
+        result = {"code": ""}
+        done = threading.Event()
+
+        def _show():
+            try:
+                with _EmailCodeDialog(self, code_length) as dlg:
+                    if dlg.ShowModal() == wx.ID_OK:
+                        result["code"] = dlg.GetCode()
+            finally:
+                done.set()
+
+        wx.CallAfter(_show)
+        done.wait()
+        return result["code"]
+
+    def _tfa_change_thread(self, action, current, new_password, hint, email):
+        import asyncio
+
+        tg = self.GetParent().tg
+
+        async def email_code_callback(code_length):
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None, self._prompt_email_code, code_length
+            )
+
+        try:
+            tg.submit_wait(
+                tg.set_password(
+                    current_password=current,
+                    new_password=new_password,
+                    hint=hint,
+                    email=email or None,
+                    email_code_callback=(
+                        email_code_callback if email else None
+                    ),
+                )
+            )
+            wx.CallAfter(self._on_tfa_change_done, action, None)
+        except Exception as e:
+            wx.CallAfter(self._on_tfa_change_done, action, e)
+
+    def _on_tfa_change_done(self, action, error):
+        from .announce import announce
+        if error is None:
+            self._account_data["has_2fa"] = action != "disable"
+            self._tfa_status_ctrl.SetValue(
+                "Enabled" if self._account_data["has_2fa"] else "Disabled"
+            )
+            messages = {
+                "setup": "Two-factor authentication enabled.",
+                "change": "Password changed.",
+                "disable": "Two-factor authentication disabled.",
+            }
+            msg = messages.get(action, "Two-factor authentication updated.")
+            self._update_tfa_buttons()
+            self._set_tfa_buttons_enabled(True)
+            announce(msg)
+            wx.MessageBox(msg, "Two-factor Authentication", wx.OK | wx.ICON_INFORMATION, self)
+        else:
+            self._tfa_status_ctrl.SetValue(
+                "Enabled" if self._account_data.get("has_2fa") else "Disabled"
+            )
+            self._set_tfa_buttons_enabled(True)
+            err_text = self._format_2fa_error(error)
+            announce("Two-factor authentication update failed")
+            wx.MessageBox(
+                err_text,
+                "Two-factor Authentication",
+                wx.OK | wx.ICON_ERROR,
+                self,
+            )
+
+    @staticmethod
+    def _format_2fa_error(error):
+        msg = str(error) or type(error).__name__
+        name = type(error).__name__
+        if "PasswordHashInvalid" in name:
+            return "The current password is incorrect."
+        if "PasswordTooFresh" in name or "FreshChangePhone" in name:
+            return (
+                "Telegram does not allow changing your password yet because "
+                "the account was authorized too recently. Try again later."
+            )
+        if "EmailUnconfirmed" in name:
+            return (
+                "The recovery email was set, but the verification code was not "
+                "entered. Your password is active; you can confirm the recovery "
+                "email later from the official Telegram app, or re-run Set Up "
+                "to redo it."
+            )
+        if "EmailInvalid" in name:
+            return "Telegram rejected the recovery email address."
+        if "EmailHashExpired" in name:
+            return (
+                "The email verification code expired before it was entered. "
+                "Try Set Up or Change Password again."
+            )
+        if "CodeInvalid" in name:
+            return "The verification code is incorrect."
+        return f"Could not update two-factor authentication:\n{msg}"
 
     def _sync_session_controls(self):
         idx = self.sessions_list.GetSelection()
