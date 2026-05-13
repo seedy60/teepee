@@ -89,13 +89,52 @@ def _ensure_titlebar_on_show(window):
     window.Bind(wx.EVT_SHOW, _on_show)
 
 
+_SET_WINDOW_THEME = None
+
+
+def _set_window_theme(hwnd, theme_name):
+    global _SET_WINDOW_THEME
+    if _SET_WINDOW_THEME is None:
+        fn = ctypes.windll.uxtheme.SetWindowTheme
+        fn.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_wchar_p,
+            ctypes.c_wchar_p,
+        ]
+        fn.restype = ctypes.c_long
+        _SET_WINDOW_THEME = fn
+    _SET_WINDOW_THEME(hwnd, theme_name, None)
+
+
 def _disable_visual_styles(window):
+    """Force a control to use Windows 11's built-in dark theme for native
+    Win32 controls so that the wx colour properties are actually visible.
+
+    Falls back to disabling visual styles entirely on older Windows that
+    don't ship the "DarkMode_*" private themes."""
     if sys.platform != "win32":
         return
     try:
-        ctypes.windll.uxtheme.SetWindowTheme(window.GetHandle(), "", "")
+        hwnd = window.GetHandle()
     except Exception:
-        pass
+        return
+    if isinstance(window, wx.Button):
+        theme = "DarkMode_Explorer"
+    elif isinstance(window, (wx.Choice, wx.ComboBox)):
+        theme = "DarkMode_CFD"
+    elif isinstance(window, wx.SpinCtrl):
+        theme = "DarkMode_Explorer"
+    elif isinstance(window, (wx.CheckBox, wx.RadioButton, wx.StaticBox)):
+        theme = "DarkMode_Explorer"
+    else:
+        theme = "DarkMode_Explorer"
+    try:
+        _set_window_theme(hwnd, theme)
+    except Exception:
+        try:
+            _set_window_theme(hwnd, "")
+        except Exception:
+            pass
 
 
 def _apply_colors(window):
