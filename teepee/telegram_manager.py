@@ -80,6 +80,15 @@ class TelegramManager:
             offset_id=offset_id,
         )
 
+    async def search_links(self, entity, limit=50, offset_id=0):
+        from telethon.tl.types import InputMessagesFilterUrl
+        return await self.client.get_messages(
+            entity,
+            limit=limit,
+            filter=InputMessagesFilterUrl,
+            offset_id=offset_id,
+        )
+
     async def mark_as_read(self, entity):
         return await self.client.send_read_acknowledge(entity)
 

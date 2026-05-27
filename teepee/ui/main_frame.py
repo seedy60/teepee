@@ -648,6 +648,12 @@ class MainFrame(wx.Frame):
                     self._msg_frame.notebook.SetSelection(1)
                     self._msg_frame.files_panel.search_ctrl.SetFocus()
                 return
+            if key == ord('6'):
+                if self._msg_frame.IsShown():
+                    self._msg_frame.Raise()
+                    self._msg_frame.notebook.SetSelection(2)
+                    self._msg_frame.links_panel.links_list.SetFocus()
+                return
 
         if event.ControlDown() and event.ShiftDown() and not event.AltDown():
             if key == ord("A"):
@@ -657,6 +663,10 @@ class MainFrame(wx.Frame):
             if key == ord("S"):
                 if self._current_entity and self._msg_frame.IsShown():
                     self.save_selected_media()
+                return
+            if key == ord("D"):
+                if self._current_entity and self._msg_frame.IsShown():
+                    self.describe_selected_media()
                 return
 
         event.Skip()
@@ -939,6 +949,7 @@ class MainFrame(wx.Frame):
         announce(f"Loading messages from {name}")
         self._load_dialogs()
         self._load_files_if_group(entity)
+        self._load_links(entity)
         threading.Thread(
             target=self._load_messages_thread,
             args=(entity,),
@@ -967,6 +978,7 @@ class MainFrame(wx.Frame):
         self.SetStatusText(f"Loading messages from {name}...")
         announce(f"Loading messages from {name}")
         self._load_files_if_group(dialog.entity)
+        self._load_links(dialog.entity)
         threading.Thread(
             target=self._load_messages_thread,
             args=(dialog.entity,),
@@ -1072,6 +1084,24 @@ class MainFrame(wx.Frame):
                     return True
         return False
 
+    @staticmethod
+    def _describable_media_kind(msg):
+        """Return 'image', 'video', or None for the message's media."""
+        if msg is None:
+            return None
+        if msg.photo:
+            return "image"
+        f = getattr(msg, "file", None)
+        mime = getattr(f, "mime_type", None) if f else None
+        if mime:
+            if mime.startswith("image/"):
+                return "image"
+            if mime.startswith("video/"):
+                return "video"
+        if msg.video or msg.video_note or getattr(msg, "gif", None):
+            return "video"
+        return None
+
     def on_message_selected(self):
         idx = self.message_panel.get_selected_message_index()
         if idx == wx.NOT_FOUND:
@@ -1080,6 +1110,7 @@ class MainFrame(wx.Frame):
             self.message_panel.show_stop_button(False)
             self.message_panel.show_save_button(False)
             self.message_panel.show_open_link_button(False)
+            self.message_panel.show_describe_button(False)
             return
         msg_idx = len(self._current_messages) - 1 - idx
         if 0 <= msg_idx < len(self._current_messages):
@@ -1106,12 +1137,16 @@ class MainFrame(wx.Frame):
             self.message_panel.show_open_link_button(
                 bool(self._extract_urls(msg.text))
             )
+            self.message_panel.show_describe_button(
+                self._describable_media_kind(msg) is not None
+            )
         else:
             self.message_panel.update_inline_buttons(None)
             self.message_panel.show_play_button(False)
             self.message_panel.show_stop_button(False)
             self.message_panel.show_save_button(False)
             self.message_panel.show_open_link_button(False)
+            self.message_panel.show_describe_button(False)
 
     def on_inline_button_click(self, msg, tl_button):
         from telethon.tl.types import KeyboardButtonUrl
@@ -2029,6 +2064,163 @@ class MainFrame(wx.Frame):
             wx.CallAfter(self.SetStatusText, "Ready")
             wx.CallAfter(self._msg_frame.SetStatusText, "Ready")
 
+    # ------------------------------------------------- Gemini descriptions
+
+    def describe_selected_media(self):
+        idx = self.message_panel.get_selected_message_index()
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        if idx == wx.NOT_FOUND:
+            wx.MessageBox(
+                "Select a message with an image or video to describe.",
+                "Describe Media",
+                wx.OK | wx.ICON_INFORMATION,
+                parent,
+            )
+            return
+        msg_idx = len(self._current_messages) - 1 - idx
+        if msg_idx < 0 or msg_idx >= len(self._current_messages):
+            return
+        msg = self._current_messages[msg_idx]
+        kind = self._describable_media_kind(msg)
+        if kind is None:
+            wx.MessageBox(
+                "The selected message has no image or video to describe.",
+                "Describe Media",
+                wx.OK | wx.ICON_INFORMATION,
+                parent,
+            )
+            return
+
+        from .. import gemini
+
+        api_key = self.config.get_gemini_api_key()
+        if not gemini.is_configured(api_key):
+            wx.MessageBox(
+                "No Gemini API key is set. Open Settings and add your Google "
+                "Gemini API key under AI descriptions to use this feature.",
+                "Describe Media",
+                wx.OK | wx.ICON_INFORMATION,
+                parent,
+            )
+            return
+
+        self.SetStatusText("Asking Gemini for a description...")
+        self._msg_frame.SetStatusText("Asking Gemini for a description...")
+        announce("Asking Gemini for a description")
+        self.message_panel.describe_btn.Enable(False)
+        threading.Thread(
+            target=self._describe_media_thread,
+            args=(msg, kind, api_key),
+            daemon=True,
+        ).start()
+
+    def _describe_media_thread(self, msg, kind, api_key):
+        import tempfile
+
+        from .. import gemini
+
+        tmp_path = None
+        try:
+            suffix = os.path.splitext(self._suggested_filename(msg))[1]
+            fd, tmp_path = tempfile.mkstemp(
+                prefix="teepee_desc_", suffix=suffix or ""
+            )
+            os.close(fd)
+            saved = self.tg.submit_wait(self.tg.download_media(msg, tmp_path))
+            if not saved:
+                raise gemini.GeminiError("Could not download the media.")
+            f = getattr(msg, "file", None)
+            mime = getattr(f, "mime_type", None) if f else None
+            if not mime:
+                mime = "video/mp4" if kind == "video" else "image/jpeg"
+            model = self.config.get("gemini_model", "gemini-2.5-flash")
+            description = gemini.describe_media(
+                api_key,
+                saved if isinstance(saved, str) else tmp_path,
+                mime,
+                is_video=(kind == "video"),
+                model=model,
+            )
+            wx.CallAfter(self._on_description_ready, description, None)
+        except gemini.GeminiError as e:
+            wx.CallAfter(self._on_description_ready, None, str(e))
+        except Exception as e:
+            log.error("Failed to describe media: %s", e, exc_info=True)
+            wx.CallAfter(
+                self._on_description_ready, None, f"Unexpected error: {e}"
+            )
+        finally:
+            if tmp_path:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    def _on_description_ready(self, description, error):
+        self.message_panel.describe_btn.Enable(True)
+        self.SetStatusText("Ready")
+        self._msg_frame.SetStatusText("Ready")
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        if error:
+            announce("Description failed")
+            wx.MessageBox(
+                error, "Describe Media", wx.OK | wx.ICON_WARNING, parent
+            )
+            return
+        announce("Description ready")
+        self._show_description_dialog(description)
+
+    def _show_description_dialog(self, description):
+        from .theme import apply_theme
+
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        dlg = wx.Dialog(
+            parent,
+            title="Media Description",
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
+        )
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(
+            wx.StaticText(dlg, label="Gemini's description:"),
+            flag=wx.LEFT | wx.TOP | wx.RIGHT,
+            border=10,
+        )
+        text_ctrl = wx.TextCtrl(
+            dlg,
+            value=description,
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_BESTWRAP,
+        )
+        text_ctrl.SetName("Media description")
+        sizer.Add(text_ctrl, 1, wx.EXPAND | wx.ALL, 10)
+
+        btn_row = wx.BoxSizer(wx.HORIZONTAL)
+        copy_btn = wx.Button(dlg, label="&Copy")
+        copy_btn.SetName("Copy description")
+        copy_btn.SetToolTip("Copy the description to the clipboard")
+        btn_row.Add(copy_btn, 0, wx.RIGHT, 5)
+        close_btn = wx.Button(dlg, wx.ID_CANCEL, label="C&lose")
+        close_btn.SetName("Close")
+        btn_row.Add(close_btn, 0)
+        sizer.Add(btn_row, 0, wx.ALIGN_RIGHT | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        dlg.SetSizerAndFit(sizer)
+        dlg.SetMinSize((460, 320))
+        dlg.CenterOnParent()
+        text_ctrl.SetFocus()
+        text_ctrl.SetInsertionPoint(0)
+
+        def _on_copy(event):
+            if wx.TheClipboard.Open():
+                wx.TheClipboard.SetData(wx.TextDataObject(description))
+                wx.TheClipboard.Close()
+                self.SetStatusText("Description copied")
+                announce("Description copied")
+
+        copy_btn.Bind(wx.EVT_BUTTON, _on_copy)
+        apply_theme(dlg)
+        dlg.ShowModal()
+        dlg.Destroy()
+
     # --------------------------------------------------- Real-time events
 
     def _on_incoming_message(self, data):
@@ -2365,6 +2557,8 @@ class MainFrame(wx.Frame):
                 self.config["chat_limit"] = dlg.GetChatLimit()
                 self.config["message_limit"] = dlg.GetMessageLimit()
                 self.config["message_template"] = dlg.GetMessageTemplate()
+                self.config.set_gemini_api_key(dlg.GetGeminiApiKey())
+                self.config["gemini_model"] = dlg.GetGeminiModel()
                 self.config.save()
                 self.sound.set_output_device(dlg.GetOutputDeviceIndex())
                 set_announcements_enabled(
@@ -3026,6 +3220,14 @@ class MainFrame(wx.Frame):
             files_panel.load_files(entity)
         else:
             files_panel.set_entity(None)
+
+    def _load_links(self, entity):
+        links_panel = self._msg_frame.links_panel
+        if entity is not None:
+            links_panel.set_entity(entity)
+            links_panel.load_links(entity)
+        else:
+            links_panel.set_entity(None)
 
     def _on_join_group(self, event):
         from .theme import apply_theme
@@ -3873,7 +4075,8 @@ class MainFrame(wx.Frame):
             "  Ctrl+2: Focus message list\n"
             "  Ctrl+3: Focus message input\n"
             "  Ctrl+4: Focus files list (groups/channels)\n"
-            "  Ctrl+5: Focus file search (groups/channels)\n\n"
+            "  Ctrl+5: Focus file search (groups/channels)\n"
+            "  Ctrl+6: Focus links list\n\n"
             "Messaging:\n"
             "  Enter: Open selected chat (in chat list) or send message (in input field)\n"
             "  Shift+Enter: New line in message\n"
@@ -3895,14 +4098,21 @@ class MainFrame(wx.Frame):
             "  Press Stop to stop audio playback\n"
             "  Audio plays inline, video opens in your default player\n"
             "  Ctrl+Shift+S: Save the selected voice message or file attachment\n"
+            "  Ctrl+Shift+D: Describe the selected image or video with Gemini\n"
             "  Press the Save button on a message with media to download it\n"
             "  Press the Open Link button on a message with a URL to open it\n"
+            "  Press the Describe button to get an AI description of media\n"
             "  Press the Sticker button to search and send stickers by emoji\n\n"
             "Files (Groups and Channels):\n"
             "  The Files tab shows all documents shared in a group or channel\n"
             "  Type in the search box to search by file name\n"
             "  Enter or double-click to download, or use the Download button\n"
             "  Press Load More to fetch older files\n\n"
+            "Links:\n"
+            "  The Links tab shows every link shared in the chat\n"
+            "  Enter, double-click, or the Open button opens the selected link\n"
+            "  Ctrl+C or the Copy button copies the selected link to the clipboard\n"
+            "  Press Load More to fetch older links\n\n"
             "Chat Management (Chat menu):\n"
             "  Mute/Unmute: Mute or unmute the selected chat's notifications\n"
             "  Block/Unblock: Block or unblock a user (user chats only)\n"

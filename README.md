@@ -5,7 +5,7 @@ Teepee is a lightweight desktop Telegram client for Windows that puts blind and 
 
 ## Teepee features
 
-Teepee is a fully-featured Telegram client. You can send and receive text messages, voice notes, stickers, files and media, place voice and video calls, manage your account, create and run groups and channels, browse files shared in groups and channels, and customise just about everything that affects what you hear and what you see. The chat list and message list live in separate windows so the chat list never disappears when you open a conversation.
+Teepee is a fully-featured Telegram client. You can send and receive text messages, voice notes, stickers, files and media, place voice and video calls, manage your account, create and run groups and channels, browse files and links shared in any chat, get AI descriptions of images and videos that arrive without a caption, and customise just about everything that affects what you hear and what you see. The chat list and message list live in separate windows so the chat list never disappears when you open a conversation.
 
 ## Running Teepee
 
@@ -121,6 +121,18 @@ If you want to start over, press the Reset Template to Default button next to th
 
 Groups and channels have a Files tab that lists every document shared in the chat. Search by name with server-side search, download files directly from the list, or press Load More to fetch older files. Use Control + 4 to focus the file list and Control + 5 to focus the file search.
 
+## Links
+
+Every chat, group, and channel has a Links tab that lists every link and URL shared in the conversation, newest first, along with who sent each one and when. This includes plain links, links hidden behind link text, and links from web page previews. Select a link and press Enter, double-click it, or press the Open button to open it in your default browser. Press Control + C or the Copy button to copy the selected link to the clipboard. Press Load More to fetch older links. Use Control + 6 to jump straight to the links list.
+
+## AI media descriptions
+
+Teepee can ask Google Gemini to describe an image or video for you, which is handy when someone sends a picture or clip with no caption (or a useless one like "pic"). Select the message and press the Describe button in the message actions, or press Control + Shift + D. The description appears in a dialog that you can read with your screen reader and copy to the clipboard. The Describe button is available for any image or video, even ones that already have a caption.
+
+This feature needs a Google Gemini API key, which you can get for free from [Google AI Studio](https://aistudio.google.com/apikey). Open the settings dialog with Control + comma, find the AI descriptions section, and paste your key into the Gemini API key field. Your key is stored securely in your operating system's credential store (Windows Credential Locker, macOS Keychain, or the Linux Secret Service) rather than in Teepee's config file. Until a key is set, Teepee will remind you where to add one. Images and short videos up to about 14 MB are supported; larger files are skipped to keep requests fast. Media is downloaded and sent to Google's Gemini API only when you press Describe.
+
+Below the key field is a Model dropdown. When you open Settings with a key already saved, Teepee automatically fetches the current list of models available to your key from Google and fills the dropdown, newest first, so the latest models always show up without any extra steps. Before that fetch finishes (or if you have no key yet) it shows a short built-in list, with gemini-2.5-flash as the fast, inexpensive default. You can also type any model name, or press Refresh models to fetch the list again (for example after pasting a new key).
+
 ## Account
 
 Open File then My Account to view and edit your full Telegram account. The dialog has four tabs:
@@ -184,6 +196,7 @@ Press Control + comma or open the Settings menu to configure:
 * Number of chats to load (10 to 500, default 100).
 * Number of messages to load per chat (10 to 500, default 50).
 * Message template (see the message presentation section above).
+* Gemini API key for AI media descriptions (see the AI media descriptions section above).
 
 ## Sound packs
 
@@ -215,6 +228,7 @@ The following table lists the keyboard shortcuts that work throughout Teepee. Yo
 | Control + 3 | Focus message input |
 | Control + 4 | Focus files list (groups and channels) |
 | Control + 5 | Focus file search (groups and channels) |
+| Control + 6 | Focus links list |
 | Enter | Send message (when in the input field) |
 | Shift + Enter | New line in message |
 | Control + R | Reply to selected message |
@@ -223,6 +237,7 @@ The following table lists the keyboard shortcuts that work throughout Teepee. Yo
 | Control + C | Copy selected message to clipboard (in message list) |
 | Control + Shift + A | Attach and send a file |
 | Control + Shift + S | Save the selected voice message or file attachment |
+| Control + Shift + D | Describe the selected image or video with Gemini |
 | Escape | Cancel reply |
 | Delete | Delete selected message or chat (choose delete for me or for everyone) |
 | Control + Shift + C | Start voice call |

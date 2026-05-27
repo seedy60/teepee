@@ -128,6 +128,14 @@ class MessagePanel(wx.Panel):
         self.msg_actions_sizer.Add(self.open_link_btn, 0, wx.ALL, 2)
         self.open_link_btn.Hide()
 
+        self.describe_btn = wx.Button(self, label="Descri&be")
+        self.describe_btn.SetName("Describe with Gemini")
+        self.describe_btn.SetToolTip(
+            "Ask Gemini to describe the selected image or video"
+        )
+        self.msg_actions_sizer.Add(self.describe_btn, 0, wx.ALL, 2)
+        self.describe_btn.Hide()
+
         sizer.Add(self.msg_actions_sizer, 0, wx.LEFT | wx.RIGHT, 5)
         sizer.Hide(self.msg_actions_sizer)
 
@@ -187,6 +195,7 @@ class MessagePanel(wx.Panel):
         self.reply_btn.Bind(wx.EVT_BUTTON, self._on_reply)
         self.cancel_reply_btn.Bind(wx.EVT_BUTTON, self._on_cancel_reply)
         self.open_link_btn.Bind(wx.EVT_BUTTON, self._on_open_link)
+        self.describe_btn.Bind(wx.EVT_BUTTON, self._on_describe)
         self.messages_list.Bind(wx.EVT_LISTBOX, self._on_message_selected)
 
     def _show_chat(self):
@@ -574,6 +583,9 @@ class MessagePanel(wx.Panel):
     def _on_open_link(self, event):
         self.frame.open_message_link()
 
+    def _on_describe(self, event):
+        self.frame.describe_selected_media()
+
     def set_reply(self, msg, preview_text):
         self._reply_to_msg = msg
         self.reply_label.SetLabel(f"Replying to: {preview_text}")
@@ -655,6 +667,17 @@ class MessagePanel(wx.Panel):
             self.open_link_btn.Hide()
             self.msg_actions_sizer.Layout()
 
+    def show_describe_button(self, show):
+        if show:
+            if not self.describe_btn.IsShown():
+                self.describe_btn.Show()
+                self.msg_actions_sizer.Layout()
+        elif self.describe_btn.IsShown():
+            if wx.Window.FindFocus() is self.describe_btn:
+                self.messages_list.SetFocus()
+            self.describe_btn.Hide()
+            self.msg_actions_sizer.Layout()
+
     def set_enabled(self, enabled):
         self.input_ctrl.Enable(enabled)
         self.send_btn.Enable(enabled)
@@ -666,6 +689,7 @@ class MessagePanel(wx.Panel):
         self.edit_msg_btn.Enable(enabled)
         self.reply_btn.Enable(enabled)
         self.open_link_btn.Enable(enabled)
+        self.describe_btn.Enable(enabled)
         if not enabled:
             focused = wx.Window.FindFocus()
             if focused and self.IsDescendant(focused):

@@ -1,6 +1,7 @@
 import wx
 
 from .files_panel import FilesPanel
+from .links_panel import LinksPanel
 from .message_panel import MessagePanel
 from .theme import apply_theme
 
@@ -19,6 +20,9 @@ class MessageFrame(wx.Frame):
 
         self.files_panel = FilesPanel(self.notebook, parent)
         self.notebook.AddPage(self.files_panel, "Files")
+
+        self.links_panel = LinksPanel(self.notebook, parent)
+        self.notebook.AddPage(self.links_panel, "Links")
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.notebook, 1, wx.EXPAND)
@@ -54,6 +58,19 @@ class MessageFrame(wx.Frame):
     def _on_char_hook(self, event):
         key = event.GetKeyCode()
         focused = wx.Window.FindFocus()
+
+        if focused == self.links_panel.links_list:
+            if key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+                self.links_panel.open_selected()
+                return
+            if (
+                key == ord("C")
+                and event.ControlDown()
+                and not event.ShiftDown()
+                and not event.AltDown()
+            ):
+                self.links_panel.copy_selected()
+                return
 
         if focused == self.message_panel.input_ctrl:
             if key == wx.WXK_RETURN and not event.ShiftDown():
@@ -110,6 +127,9 @@ class MessageFrame(wx.Frame):
             if key == ord("S"):
                 self.main_frame.save_selected_media()
                 return
+            if key == ord("D"):
+                self.main_frame.describe_selected_media()
+                return
             if key == ord(";"):
                 self.main_frame.show_reply_target_for_selected_message()
                 return
@@ -136,6 +156,10 @@ class MessageFrame(wx.Frame):
             if key == ord("5"):
                 self.notebook.SetSelection(1)
                 self.files_panel.search_ctrl.SetFocus()
+                return
+            if key == ord("6"):
+                self.notebook.SetSelection(2)
+                self.links_panel.links_list.SetFocus()
                 return
             if key == ord("Q"):
                 self.main_frame.quit()

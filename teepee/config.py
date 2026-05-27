@@ -6,6 +6,9 @@ from pathlib import Path
 DEFAULT_MESSAGE_TEMPLATE = "[msg], [user] at [datetime] [seen]"
 
 
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+
+
 DEFAULT_CONFIG = {
     "api_id": "",
     "api_hash": "",
@@ -19,6 +22,7 @@ DEFAULT_CONFIG = {
     "sound_pack": "default",
     "time_format": "24h",
     "message_template": DEFAULT_MESSAGE_TEMPLATE,
+    "gemini_model": DEFAULT_GEMINI_MODEL,
 }
 
 
@@ -85,3 +89,13 @@ class Config:
 
     def __setitem__(self, key, value):
         self._data[key] = value
+
+    def get_gemini_api_key(self) -> str:
+        """Return the Gemini API key from the OS keyring (or "" if unset)."""
+        from .secret_store import get_secret
+        return get_secret("gemini_api_key")
+
+    def set_gemini_api_key(self, value: str):
+        """Store the Gemini API key in the OS keyring, not in config.json."""
+        from .secret_store import set_secret
+        set_secret("gemini_api_key", value or "")

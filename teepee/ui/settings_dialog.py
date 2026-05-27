@@ -1,7 +1,8 @@
 import threading
 import wx
 
-from ..config import DEFAULT_MESSAGE_TEMPLATE
+from ..config import DEFAULT_GEMINI_MODEL, DEFAULT_MESSAGE_TEMPLATE
+from .. import gemini
 from .announce import list_announcement_backends, list_announcement_voices
 from .theme import apply_theme
 
@@ -296,6 +297,75 @@ class SettingsDialog(wx.Dialog):
             border=10,
         )
 
+        # --- AI descriptions ---
+        ai_box = wx.StaticBoxSizer(wx.VERTICAL, self, "AI descriptions")
+        ai_box.Add(
+            wx.StaticText(
+                self,
+                label=(
+                    "Gemini API key (for describing images and videos that\n"
+                    "arrive without a useful caption):"
+                ),
+            ),
+            flag=wx.LEFT | wx.TOP,
+            border=5,
+        )
+        self.gemini_key_ctrl = wx.TextCtrl(
+            self,
+            value=config.get_gemini_api_key() or "",
+            style=wx.TE_PASSWORD,
+        )
+        self.gemini_key_ctrl.SetName("Gemini API key")
+        self.gemini_key_ctrl.SetToolTip(
+            "Paste your Google Gemini API key from aistudio.google.com. "
+            "Leave blank to disable AI descriptions."
+        )
+        ai_box.Add(
+            self.gemini_key_ctrl, flag=wx.EXPAND | wx.ALL, border=5
+        )
+
+        ai_box.Add(
+            wx.StaticText(self, label="Model:"),
+            flag=wx.LEFT | wx.TOP,
+            border=5,
+        )
+        current_model = config.get("gemini_model", DEFAULT_GEMINI_MODEL) or DEFAULT_GEMINI_MODEL
+        model_choices = list(gemini.COMMON_MODELS)
+        if current_model not in model_choices:
+            model_choices.insert(0, current_model)
+        self.gemini_model_combo = wx.ComboBox(
+            self,
+            value=current_model,
+            choices=model_choices,
+            style=wx.CB_DROPDOWN,
+        )
+        self.gemini_model_combo.SetName("Gemini model")
+        self.gemini_model_combo.SetToolTip(
+            "Choose a Gemini model, or type one. Press Refresh models to "
+            "list the models available to your API key."
+        )
+        ai_box.Add(
+            self.gemini_model_combo, flag=wx.EXPAND | wx.ALL, border=5
+        )
+
+        self.refresh_models_btn = wx.Button(self, label="&Refresh models")
+        self.refresh_models_btn.SetName("Refresh models")
+        self.refresh_models_btn.SetToolTip(
+            "Fetch the list of models available to the entered API key"
+        )
+        self.refresh_models_btn.Bind(wx.EVT_BUTTON, self._on_refresh_models)
+        ai_box.Add(
+            self.refresh_models_btn,
+            flag=wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            border=5,
+        )
+
+        sizer.Add(
+            ai_box,
+            flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            border=10,
+        )
+
         # --- Buttons ---
         btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
         sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
@@ -305,6 +375,94 @@ class SettingsDialog(wx.Dialog):
         self.CenterOnParent()
         self.output_choice.SetFocus()
         apply_theme(self)
+
+        # Automatically pull the live model list if a key is already saved, so
+        # the dropdown reflects the latest models without a manual refresh.
+        self._models_loading = False
+        saved_key = config.get_gemini_api_key()
+        if saved_key:
+            self._start_model_fetch(saved_key, manual=False)
+
+    def GetGeminiApiKey(self):
+        return self.gemini_key_ctrl.GetValue().strip()
+
+    def GetGeminiModel(self):
+        value = self.gemini_model_combo.GetValue().strip()
+        return value or DEFAULT_GEMINI_MODEL
+
+    def _on_refresh_models(self, event):
+        api_key = self.gemini_key_ctrl.GetValue().strip()
+        if not api_key:
+            wx.MessageBox(
+                "Enter your Gemini API key first, then refresh.",
+                "Refresh Models",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            self.gemini_key_ctrl.SetFocus()
+            return
+        self._start_model_fetch(api_key, manual=True)
+
+    def _start_model_fetch(self, api_key, manual):
+        if self._models_loading:
+            return
+        self._models_loading = True
+        self.refresh_models_btn.Enable(False)
+        self.refresh_models_btn.SetLabel("Refreshing...")
+        threading.Thread(
+            target=self._refresh_models_thread,
+            args=(api_key, manual),
+            daemon=True,
+        ).start()
+
+    def _refresh_models_thread(self, api_key, manual):
+        try:
+            models = gemini.list_models(api_key)
+            wx.CallAfter(self._on_models_loaded, models, None, manual)
+        except gemini.GeminiError as e:
+            wx.CallAfter(self._on_models_loaded, None, str(e), manual)
+        except Exception as e:
+            wx.CallAfter(
+                self._on_models_loaded, None, f"Unexpected error: {e}", manual
+            )
+
+    def _on_models_loaded(self, models, error, manual):
+        # The dialog may have been closed while the fetch was in flight.
+        try:
+            self.refresh_models_btn.Enable(True)
+            self.refresh_models_btn.SetLabel("&Refresh models")
+        except RuntimeError:
+            return
+        self._models_loading = False
+        if error:
+            # Auto-fetch on open fails quietly; only the manual button reports.
+            if manual:
+                wx.MessageBox(
+                    error, "Refresh Models", wx.OK | wx.ICON_WARNING, self
+                )
+            return
+        if not models:
+            if manual:
+                wx.MessageBox(
+                    "No usable models were returned for this key.",
+                    "Refresh Models",
+                    wx.OK | wx.ICON_INFORMATION,
+                    self,
+                )
+            return
+        current = self.gemini_model_combo.GetValue().strip()
+        self.gemini_model_combo.Set(models)
+        if current in models:
+            self.gemini_model_combo.SetValue(current)
+        elif current:
+            # Preserve a custom/typed model even if the live list lacks it.
+            self.gemini_model_combo.SetValue(current)
+        else:
+            self.gemini_model_combo.SetValue(models[0])
+        if manual:
+            self.gemini_model_combo.SetFocus()
+            from .announce import announce
+            announce(f"{len(models)} models available")
 
     def GetOutputDeviceIndex(self):
         return self.output_choice.GetSelection()

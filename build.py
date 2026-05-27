@@ -52,6 +52,15 @@ def build_hidden_imports():
         "--hidden-import", "struct",
         "--hidden-import", "hashlib",
         "--hidden-import", "sqlite3",
+        # keyring + its Windows credential-store backend. The win32ctypes
+        # modules are imported lazily inside the backend, so PyInstaller's
+        # static analysis misses them without these explicit hints.
+        "--hidden-import", "keyring",
+        "--hidden-import", "keyring.backends",
+        "--hidden-import", "keyring.backends.Windows",
+        "--hidden-import", "win32ctypes.pywin32.win32cred",
+        "--hidden-import", "win32ctypes.pywin32.pywintypes",
+        "--collect-submodules", "keyring",
     ]
 
 
