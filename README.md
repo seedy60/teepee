@@ -39,11 +39,11 @@ uv run python run.py
 ### Compiled.
 
 If you just want a pre-compiled binary without having to fight with Python, you can [download the latest release here](https://github.com/seedy60/teepee/releases/latest/download/Teepee.zip). To run this, simply extract the zip file and run Teepee.exe. If file extensions don't show on your system, the filename will just be Teepee.
-The pre-compiled Teepee binary runs on Windows 10 and higher.
+The pre-compiled Teepee binary runs on Windows 7 and higher.
 
 ## Telegram API credentials
 
-Teepee needs a Telegram API ID and API Hash to connect. Official Teepee builds already have these baked in. If your build does not have credentials embedded, the app will prompt you to enter them on first launch.
+Teepee needs a Telegram API ID and API Hash to connect. Official Teepee binaries already have these baked in. If your build does not have credentials embedded, the app will prompt you to enter them on first launch.
 
 To get your own credentials:
 
