@@ -119,7 +119,7 @@ If you want to start over, press the Reset Template to Default button next to th
 
 ## File browser
 
-Groups and channels have a Files tab that lists every document shared in the chat. Search by name with server-side search, download files directly from the list, or press Load More to fetch older files. Use Control + 4 to focus the file list and Control + 5 to focus the file search.
+Every chat -- one-on-one user chats as well as groups and channels -- has a Files tab that lists every document shared in the conversation. Search by name with server-side search, download files directly from the list, or press Load More to fetch older files. Use Control + 4 to focus the file list and Control + 5 to focus the file search.
 
 ## Links
 
@@ -127,7 +127,7 @@ Every chat, group, and channel has a Links tab that lists every link and URL sha
 
 ## AI media descriptions
 
-Teepee can ask Google Gemini to describe an image or video for you, which is handy when someone sends a picture or clip with no caption (or a useless one like "pic"). Select the message and press the Describe button in the message actions, or press Control + Shift + D. The description appears in a dialog that you can read with your screen reader and copy to the clipboard. The Describe button is available for any image or video, even ones that already have a caption.
+Teepee can ask Google Gemini to describe an image or video for you, which is handy when someone sends a picture or clip with no caption (or a useless one like "pic"). Select the message and press the Describe button in the message actions, or press Control + Shift + D. A dialog opens immediately announcing that the request is in flight, so your screen reader confirms the action even if Teepee's spoken announcements are turned off; a Cancel button lets you dismiss it while the request is running. When Gemini responds, the same dialog updates in place with the description (or an error explanation) and a Copy button so you can put it on the clipboard. The Describe button is available for any image or video, even ones that already have a caption.
 
 This feature needs a Google Gemini API key, which you can get for free from [Google AI Studio](https://aistudio.google.com/apikey). Open the settings dialog with Control + comma, find the AI descriptions section, and paste your key into the Gemini API key field. Your key is stored securely in your operating system's credential store (Windows Credential Locker, macOS Keychain, or the Linux Secret Service) rather than in Teepee's config file. Until a key is set, Teepee will remind you where to add one. Images and short videos up to about 14 MB are supported; larger files are skipped to keep requests fast. Media is downloaded and sent to Google's Gemini API only when you press Describe.
 
@@ -153,7 +153,7 @@ From the Group menu you can:
 * Generate an invite link for the currently selected group or channel and copy it to the clipboard.
 * Leave the currently selected group or channel.
 * View the member list, including role labels (Owner, Admin, Member).
-* Promote a member to admin or remove the admin role from the member list dialog.
+* Promote a member to admin or remove the admin role from the member list dialog. When promoting to admin in a supergroup or channel, you can also tick "Post anonymously" so their messages appear as coming from the group or channel itself rather than from their user account; their other admin permissions are preserved unchanged.
 * Change per-member send permissions in channels and supergroups directly from the member list dialog.
 * Kick members directly from the member list dialog or by username.
 * Edit the group title.
@@ -206,7 +206,7 @@ Sound packs are collections of sounds that Teepee uses to indicate user actions 
 
 ### Creating and adding sound packs
 
-You can use the default sound pack as a basis when creating your own sound packs. The default pack ships in the sounds/default folder with these eight wave files: sent.wav, received.wav, group_received.wav, channel_received.wav, call_in.wav, call_out.wav, reply_sent.wav, and reply_received.wav. To add a sound pack, create a new folder inside Teepee's sounds folder, E.G. sounds/retro, and add your wave files into the folder using the same filenames. Be sure to check your filenames against the default folder, otherwise your sounds might not play.
+You can use the default sound pack as a basis when creating your own sound packs. The default pack ships in the sounds/default folder with these ten wave files: sent.wav, received.wav, group_received.wav, channel_received.wav, call_in.wav, call_out.wav, reply_sent.wav, voice_start.wav, voice_stop.wav, and reply_received.wav. To add a sound pack, create a new folder inside Teepee's sounds folder, E.G. sounds/retro, and add your wave files into the folder using the same filenames. Be sure to check your filenames against the default folder, otherwise your sounds might not play.
 
 ### Changing sound packs.
 
