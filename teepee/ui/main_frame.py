@@ -265,6 +265,115 @@ class MemberPermissionsDialog(wx.Dialog):
         }
 
 
+class MemberRoleDialog(wx.Dialog):
+    """Role editor for supergroup and channel members.
+
+    Exposes the current role (Member or Admin) as radio buttons and, when
+    the entity is a supergroup or channel, a "Post anonymously" checkbox
+    that maps to ``ChatAdminRights.anonymous``. The anonymous toggle is
+    only enabled when the Admin role is selected.
+    """
+
+    def __init__(
+        self,
+        parent,
+        member_name,
+        current_role,
+        current_anonymous=False,
+        anonymous_available=True,
+    ):
+        super().__init__(
+            parent,
+            title=f"Role - {member_name}",
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(
+            wx.StaticText(self, label=f"Set role for {member_name}:"),
+            flag=wx.ALL,
+            border=10,
+        )
+
+        self.member_radio = wx.RadioButton(
+            self, label="&Member", style=wx.RB_GROUP
+        )
+        self.member_radio.SetName("Member")
+        self.member_radio.SetToolTip(
+            "Regular member with no administrative permissions"
+        )
+        self.admin_radio = wx.RadioButton(self, label="&Admin")
+        self.admin_radio.SetName("Admin")
+        self.admin_radio.SetToolTip(
+            "Administrator with permission to manage this chat"
+        )
+        sizer.Add(self.member_radio, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=10)
+        sizer.Add(self.admin_radio, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=10)
+
+        anon_label = wx.StaticText(
+            self, label="Anonymous posting (admins only):"
+        )
+        sizer.Add(anon_label, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=10)
+
+        self.anonymous_cb = wx.CheckBox(
+            self, label="Post an&onymously as the chat"
+        )
+        self.anonymous_cb.SetName("Post anonymously")
+        self.anonymous_cb.SetToolTip(
+            "When enabled, this admin's messages appear as coming from the "
+            "chat itself rather than their user account"
+        )
+        sizer.Add(
+            self.anonymous_cb, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=10
+        )
+
+        if current_role == "admin":
+            self.admin_radio.SetValue(True)
+        else:
+            self.member_radio.SetValue(True)
+
+        self.anonymous_cb.SetValue(bool(current_anonymous))
+        self._anonymous_available = bool(anonymous_available)
+
+        self.member_radio.Bind(wx.EVT_RADIOBUTTON, self._on_role_changed)
+        self.admin_radio.Bind(wx.EVT_RADIOBUTTON, self._on_role_changed)
+
+        btn_sizer = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=10)
+
+        self.SetSizerAndFit(sizer)
+        self.CenterOnParent()
+        self._sync_anonymous_state()
+        if current_role == "admin":
+            self.admin_radio.SetFocus()
+        else:
+            self.member_radio.SetFocus()
+
+        from .theme import apply_theme
+
+        apply_theme(self)
+
+    def _on_role_changed(self, event):
+        self._sync_anonymous_state()
+        event.Skip()
+
+    def _sync_anonymous_state(self):
+        enabled = self._anonymous_available and self.admin_radio.GetValue()
+        self.anonymous_cb.Enable(enabled)
+        if not enabled and not self._anonymous_available:
+            self.anonymous_cb.SetValue(False)
+
+    def GetMakeAdmin(self):
+        return self.admin_radio.GetValue()
+
+    def GetAnonymous(self):
+        if not self._anonymous_available:
+            return False
+        if not self.admin_radio.GetValue():
+            return False
+        return self.anonymous_cb.GetValue()
+
+
 def _make_tray_icon():
     """Create a simple 16x16 tray icon with a 'T' on a blue background."""
     bmp = wx.Bitmap(16, 16)
@@ -308,6 +417,247 @@ class TeepeeTaskBarIcon(wx.adv.TaskBarIcon):
         self.frame.quit()
 
 
+class _VoicePreviewDialog(wx.Dialog):
+    """Preview a just-recorded voice message before sending.
+
+    Plays back the WAV through the existing sound_manager, lets the user
+    listen as many times as they like, and returns ``wx.ID_OK`` for Send or
+    ``wx.ID_CANCEL`` for Discard. Closes any active playback on its way out.
+    """
+
+    SEND_ID = wx.ID_OK
+    DISCARD_ID = wx.ID_CANCEL
+
+    def __init__(self, parent, wav_path, sound_manager):
+        super().__init__(
+            parent,
+            title="Voice Message Preview",
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+        self._wav_path = wav_path
+        self._sound = sound_manager
+        self._stream = None
+        self._poll_timer = None
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        duration = sound_manager._media_duration(wav_path)
+        if duration > 0:
+            length_text = f"Recording length: {duration:.1f} seconds."
+        else:
+            length_text = "Recording captured."
+        sizer.Add(
+            wx.StaticText(
+                self,
+                label=(
+                    f"{length_text} Press Play to listen, then choose Send "
+                    "to send the voice message, or Discard to throw it away."
+                ),
+            ),
+            flag=wx.ALL,
+            border=10,
+        )
+
+        btn_row = wx.BoxSizer(wx.HORIZONTAL)
+
+        self.play_btn = wx.Button(self, label="&Play")
+        self.play_btn.SetName("Play recording")
+        self.play_btn.SetToolTip("Play back the recording you just made")
+        self.play_btn.Bind(wx.EVT_BUTTON, self._on_play)
+        btn_row.Add(self.play_btn, 0, wx.RIGHT, 5)
+
+        self.send_btn = wx.Button(self, self.SEND_ID, label="&Send")
+        self.send_btn.SetName("Send recording")
+        self.send_btn.SetToolTip("Send the recording as a voice message")
+        btn_row.Add(self.send_btn, 0, wx.RIGHT, 5)
+
+        self.discard_btn = wx.Button(self, self.DISCARD_ID, label="&Discard")
+        self.discard_btn.SetName("Discard recording")
+        self.discard_btn.SetToolTip("Delete the recording without sending it")
+        btn_row.Add(self.discard_btn, 0)
+
+        sizer.Add(
+            btn_row,
+            0,
+            wx.ALIGN_RIGHT | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            10,
+        )
+
+        self.SetSizerAndFit(sizer)
+        self.SetMinSize((420, -1))
+        self.CenterOnParent()
+        self.send_btn.SetFocus()
+
+        self.Bind(wx.EVT_CLOSE, self._on_close)
+        # Make sure playback is stopped before the dialog closes via any
+        # button (Send, Discard, Escape, or the system close icon).
+        self.send_btn.Bind(wx.EVT_BUTTON, self._on_send_btn)
+        self.discard_btn.Bind(wx.EVT_BUTTON, self._on_discard_btn)
+
+        from .theme import apply_theme
+        apply_theme(self)
+
+    def _on_play(self, event):
+        if self._stream is not None:
+            self._stop_playback()
+            announce("Playback stopped")
+            return
+        stream = self._sound.play_file(self._wav_path)
+        if stream is None:
+            announce("Could not play the recording")
+            return
+        self._stream = stream
+        self.play_btn.SetLabel("S&top")
+        self.play_btn.SetName("Stop playback")
+        self.play_btn.SetToolTip("Stop playback")
+        announce("Playing recording")
+        # Poll so we can revert the label automatically when playback ends.
+        self._poll_timer = wx.CallLater(250, self._check_playback)
+
+    def _check_playback(self):
+        self._poll_timer = None
+        if self._stream is None:
+            return
+        try:
+            still_playing = bool(self._stream.is_playing)
+        except Exception:
+            still_playing = False
+        if not still_playing:
+            self._stop_playback(reverted=True)
+            return
+        self._poll_timer = wx.CallLater(250, self._check_playback)
+
+    def _stop_playback(self, reverted=False):
+        if self._poll_timer is not None:
+            try:
+                self._poll_timer.Stop()
+            except Exception:
+                pass
+            self._poll_timer = None
+        if self._stream is not None:
+            self._sound.stop_stream(self._stream)
+            self._stream = None
+        self.play_btn.SetLabel("&Play")
+        self.play_btn.SetName("Play recording")
+        self.play_btn.SetToolTip("Play back the recording you just made")
+        if reverted:
+            announce("Playback finished")
+
+    def _on_send_btn(self, event):
+        self._stop_playback()
+        event.Skip()
+
+    def _on_discard_btn(self, event):
+        self._stop_playback()
+        event.Skip()
+
+    def _on_close(self, event):
+        self._stop_playback()
+        event.Skip()
+
+
+class _DescriptionDialog(wx.Dialog):
+    """Modal dialog for a Gemini media-description request.
+
+    Opens immediately when the user triggers Describe, so a screen reader
+    always announces something the moment the action starts — even when
+    Teepee's own Prism announcements are turned off. The text and buttons
+    swap in place when the result (or an error) arrives.
+    """
+
+    def __init__(self, parent):
+        super().__init__(
+            parent,
+            title="Media Description",
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
+        )
+        self.cancelled = False
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        self.label = wx.StaticText(
+            self, label="Asking Gemini for a description:"
+        )
+        sizer.Add(self.label, flag=wx.LEFT | wx.TOP | wx.RIGHT, border=10)
+
+        self.text_ctrl = wx.TextCtrl(
+            self,
+            value="Asking Gemini for a description. Please wait...",
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_BESTWRAP,
+        )
+        self.text_ctrl.SetName("Media description")
+        sizer.Add(self.text_ctrl, 1, wx.EXPAND | wx.ALL, 10)
+
+        btn_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.copy_btn = wx.Button(self, label="&Copy")
+        self.copy_btn.SetName("Copy description")
+        self.copy_btn.SetToolTip("Copy the description to the clipboard")
+        self.copy_btn.Hide()
+        btn_row.Add(self.copy_btn, 0, wx.RIGHT, 5)
+
+        self.close_btn = wx.Button(self, wx.ID_CANCEL, label="&Cancel")
+        self.close_btn.SetName("Cancel")
+        btn_row.Add(self.close_btn, 0)
+
+        sizer.Add(
+            btn_row,
+            0,
+            wx.ALIGN_RIGHT | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            10,
+        )
+
+        self.SetSizerAndFit(sizer)
+        self.SetMinSize((460, 320))
+        self.CenterOnParent()
+        self.text_ctrl.SetFocus()
+        self.text_ctrl.SetInsertionPoint(0)
+
+        self.copy_btn.Bind(wx.EVT_BUTTON, self._on_copy)
+        self.close_btn.Bind(wx.EVT_BUTTON, self._on_close_btn)
+        self.Bind(wx.EVT_CLOSE, self._on_close_evt)
+
+        from .theme import apply_theme
+        apply_theme(self)
+
+    def set_result(self, description):
+        self.SetTitle("Media Description (ready)")
+        self.label.SetLabel("Gemini's description:")
+        self.text_ctrl.SetValue(description)
+        if not self.copy_btn.IsShown():
+            self.copy_btn.Show()
+        self.close_btn.SetLabel("C&lose")
+        self.close_btn.SetName("Close")
+        self.Layout()
+        # Refocus the text so screen readers re-announce its new content.
+        self.text_ctrl.SetFocus()
+        self.text_ctrl.SetInsertionPoint(0)
+
+    def set_error(self, message):
+        self.SetTitle("Media Description (failed)")
+        self.label.SetLabel("Gemini could not describe this media:")
+        self.text_ctrl.SetValue(message)
+        self.close_btn.SetLabel("C&lose")
+        self.close_btn.SetName("Close")
+        self.Layout()
+        self.text_ctrl.SetFocus()
+        self.text_ctrl.SetInsertionPoint(0)
+
+    def _on_copy(self, event):
+        if wx.TheClipboard.Open():
+            wx.TheClipboard.SetData(wx.TextDataObject(self.text_ctrl.GetValue()))
+            wx.TheClipboard.Close()
+            from .announce import announce
+            announce("Description copied")
+
+    def _on_close_btn(self, event):
+        self.cancelled = True
+        event.Skip()
+
+    def _on_close_evt(self, event):
+        self.cancelled = True
+        event.Skip()
+
+
 class MainFrame(wx.Frame):
     def __init__(
         self,
@@ -339,6 +689,7 @@ class MainFrame(wx.Frame):
         self._ringing_stream = None
         self._call_out_stream = None
         self._in_call_dlg = None
+        self._voice_start_timer = None
 
         self._create_ui()
         self._create_menu()
@@ -1263,7 +1614,8 @@ class MainFrame(wx.Frame):
                     reply_to=reply_to,
                     caption=caption,
                     force_document=True,
-                )
+                ),
+                timeout=None,
             )
             wx.CallAfter(self._on_send_success, entity, msg)
         except Exception as e:
@@ -1435,7 +1787,8 @@ class MainFrame(wx.Frame):
     def _send_sticker_thread(self, entity, sticker, reply_to=None):
         try:
             msg = self.tg.submit_wait(
-                self.tg.send_sticker(entity, sticker, reply_to=reply_to)
+                self.tg.send_sticker(entity, sticker, reply_to=reply_to),
+                timeout=None,
             )
             wx.CallAfter(self._on_send_success, entity, msg)
         except Exception as e:
@@ -1804,7 +2157,6 @@ class MainFrame(wx.Frame):
         self.chat_list.remove_chat(deleted_id)
         self.SetStatusText("Chat deleted")
         announce("Chat deleted")
-        announce("Chat deleted")
         self._load_dialogs()
         self.Raise()
         self.chat_list.list_ctrl.SetFocus()
@@ -1812,6 +2164,24 @@ class MainFrame(wx.Frame):
     # ---------------------------------------------------- Voice messages
 
     def start_voice_recording(self):
+        # Play the start-of-recording cue first; only activate the mic once
+        # the cue has finished, otherwise it would be captured in the
+        # recording. If the cue is missing or sounds are off, start the mic
+        # immediately.
+        if self._voice_start_timer is not None:
+            self._voice_start_timer.Stop()
+            self._voice_start_timer = None
+        cue_seconds = self.sound.play_voice_start()
+        if cue_seconds > 0:
+            delay_ms = int(cue_seconds * 1000) + 75  # small safety buffer
+            self._voice_start_timer = wx.CallLater(
+                delay_ms, self._begin_voice_recording
+            )
+        else:
+            self._begin_voice_recording()
+
+    def _begin_voice_recording(self):
+        self._voice_start_timer = None
         path = self.voice.start_recording()
         if not path:
             self.message_panel._recording = False
@@ -1829,22 +2199,65 @@ class MainFrame(wx.Frame):
             )
 
     def stop_voice_recording(self):
-        file_path = self.voice.stop_recording()
-        if file_path and self._current_entity:
-            entity = self._current_entity
-            threading.Thread(
-                target=self._send_voice_thread,
-                args=(entity, file_path),
-                daemon=True,
-            ).start()
-        elif not file_path:
+        # If the user stopped before the mic actually started, cancel the
+        # pending start and treat the whole thing as a no-op recording.
+        if self._voice_start_timer is not None:
+            self._voice_start_timer.Stop()
+            self._voice_start_timer = None
+            self.sound.play_voice_stop()
+            self.SetStatusText("Recording cancelled")
+            self._msg_frame.SetStatusText("Recording cancelled")
+            announce("Recording cancelled")
+            return
+        wav_path = self.voice.stop_recording()
+        # Cue plays after the mic is closed, so the cue itself can't end up
+        # in the recording.
+        self.sound.play_voice_stop()
+        if not wav_path:
             self.SetStatusText("Recording failed")
             self._msg_frame.SetStatusText("Recording failed")
             announce("Recording failed")
+            return
+        if not self._current_entity:
+            # No chat open to send to — discard rather than lose state.
+            self.voice.discard_recording(wav_path)
+            self.SetStatusText("Voice message discarded")
+            self._msg_frame.SetStatusText("Voice message discarded")
+            announce("No chat open. Voice message discarded.")
+            return
+        self._show_voice_preview(wav_path)
 
-    def _send_voice_thread(self, entity, file_path):
+    def _show_voice_preview(self, wav_path):
+        parent = self._msg_frame if self._msg_frame.IsShown() else self
+        dlg = _VoicePreviewDialog(parent, wav_path, self.sound)
         try:
-            self.tg.submit_wait(self.tg.send_voice(entity, file_path))
+            result = dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        if result == _VoicePreviewDialog.SEND_ID:
+            entity = self._current_entity
+            self.SetStatusText("Sending voice message...")
+            self._msg_frame.SetStatusText("Sending voice message...")
+            announce("Sending voice message")
+            threading.Thread(
+                target=self._send_voice_thread,
+                args=(entity, wav_path),
+                daemon=True,
+            ).start()
+        else:
+            self.voice.discard_recording(wav_path)
+            self.SetStatusText("Voice message discarded")
+            self._msg_frame.SetStatusText("Voice message discarded")
+            announce("Voice message discarded")
+
+    def _send_voice_thread(self, entity, wav_path):
+        try:
+            send_path = self.voice.convert_for_send(wav_path)
+            if not send_path:
+                raise RuntimeError("Could not prepare voice message for sending")
+            self.tg.submit_wait(
+                self.tg.send_voice(entity, send_path), timeout=None
+            )
             wx.CallAfter(self._on_voice_sent)
         except Exception as e:
             log.error("Failed to send voice message: %s", e)
@@ -1896,7 +2309,9 @@ class MainFrame(wx.Frame):
         try:
             dl_path = self.voice.get_download_path(msg.id)
             if not os.path.exists(dl_path):
-                self.tg.submit_wait(self.tg.download_media(msg, dl_path))
+                self.tg.submit_wait(
+                    self.tg.download_media(msg, dl_path), timeout=None
+                )
             wx.CallAfter(self._play_voice_file, dl_path)
         except Exception as e:
             log.error("Failed to download voice message: %s", e)
@@ -1927,7 +2342,7 @@ class MainFrame(wx.Frame):
             else:
                 dl_dir = self.voice.download_dir + os.sep
                 downloaded = self.tg.submit_wait(
-                    self.tg.download_media(msg, dl_dir)
+                    self.tg.download_media(msg, dl_dir), timeout=None
                 )
                 if downloaded:
                     self._media_cache[msg.id] = downloaded
@@ -2004,6 +2419,7 @@ class MainFrame(wx.Frame):
                 wx.OK | wx.ICON_INFORMATION,
                 parent,
             )
+            self._restore_message_action_focus()
             return
         msg_idx = len(self._current_messages) - 1 - idx
         if msg_idx < 0 or msg_idx >= len(self._current_messages):
@@ -2017,6 +2433,7 @@ class MainFrame(wx.Frame):
                 wx.OK | wx.ICON_INFORMATION,
                 parent,
             )
+            self._restore_message_action_focus()
             return
         suggested = self._suggested_filename(msg)
         parent = self._msg_frame if self._msg_frame.IsShown() else self
@@ -2041,7 +2458,7 @@ class MainFrame(wx.Frame):
     def _save_media_thread(self, msg, save_path):
         try:
             result = self.tg.submit_wait(
-                self.tg.download_media(msg, save_path)
+                self.tg.download_media(msg, save_path), timeout=None
             )
             if result:
                 name = os.path.basename(save_path)
@@ -2057,9 +2474,10 @@ class MainFrame(wx.Frame):
                 )
                 wx.CallAfter(announce, "Download failed")
         except Exception as e:
-            log.error("Failed to save media: %s", e)
+            detail = str(e) or type(e).__name__
+            log.error("Failed to save media: %s", detail, exc_info=True)
             wx.CallAfter(
-                self._show_error, f"Failed to save file:\n{e}"
+                self._show_error, f"Failed to save file:\n{detail}"
             )
             wx.CallAfter(self.SetStatusText, "Ready")
             wx.CallAfter(self._msg_frame.SetStatusText, "Ready")
@@ -2076,6 +2494,7 @@ class MainFrame(wx.Frame):
                 wx.OK | wx.ICON_INFORMATION,
                 parent,
             )
+            self._restore_message_action_focus()
             return
         msg_idx = len(self._current_messages) - 1 - idx
         if msg_idx < 0 or msg_idx >= len(self._current_messages):
@@ -2089,6 +2508,7 @@ class MainFrame(wx.Frame):
                 wx.OK | wx.ICON_INFORMATION,
                 parent,
             )
+            self._restore_message_action_focus()
             return
 
         from .. import gemini
@@ -2108,13 +2528,25 @@ class MainFrame(wx.Frame):
         self._msg_frame.SetStatusText("Asking Gemini for a description...")
         announce("Asking Gemini for a description")
         self.message_panel.describe_btn.Enable(False)
+
+        # Show the dialog before the network call starts so screen readers
+        # always announce that the request is in flight, even when Teepee's
+        # own announcements are turned off.
+        dlg = _DescriptionDialog(parent)
         threading.Thread(
             target=self._describe_media_thread,
-            args=(msg, kind, api_key),
+            args=(msg, kind, api_key, dlg),
             daemon=True,
         ).start()
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+            self.message_panel.describe_btn.Enable(True)
+            self.SetStatusText("Ready")
+            self._msg_frame.SetStatusText("Ready")
 
-    def _describe_media_thread(self, msg, kind, api_key):
+    def _describe_media_thread(self, msg, kind, api_key, dlg):
         import tempfile
 
         from .. import gemini
@@ -2126,7 +2558,9 @@ class MainFrame(wx.Frame):
                 prefix="teepee_desc_", suffix=suffix or ""
             )
             os.close(fd)
-            saved = self.tg.submit_wait(self.tg.download_media(msg, tmp_path))
+            saved = self.tg.submit_wait(
+                self.tg.download_media(msg, tmp_path), timeout=None
+            )
             if not saved:
                 raise gemini.GeminiError("Could not download the media.")
             f = getattr(msg, "file", None)
@@ -2141,13 +2575,13 @@ class MainFrame(wx.Frame):
                 is_video=(kind == "video"),
                 model=model,
             )
-            wx.CallAfter(self._on_description_ready, description, None)
+            wx.CallAfter(self._on_description_ready, dlg, description, None)
         except gemini.GeminiError as e:
-            wx.CallAfter(self._on_description_ready, None, str(e))
+            wx.CallAfter(self._on_description_ready, dlg, None, str(e))
         except Exception as e:
             log.error("Failed to describe media: %s", e, exc_info=True)
             wx.CallAfter(
-                self._on_description_ready, None, f"Unexpected error: {e}"
+                self._on_description_ready, dlg, None, f"Unexpected error: {e}"
             )
         finally:
             if tmp_path:
@@ -2156,70 +2590,23 @@ class MainFrame(wx.Frame):
                 except OSError:
                     pass
 
-    def _on_description_ready(self, description, error):
-        self.message_panel.describe_btn.Enable(True)
-        self.SetStatusText("Ready")
-        self._msg_frame.SetStatusText("Ready")
-        parent = self._msg_frame if self._msg_frame.IsShown() else self
-        if error:
-            announce("Description failed")
-            wx.MessageBox(
-                error, "Describe Media", wx.OK | wx.ICON_WARNING, parent
-            )
+    def _on_description_ready(self, dlg, description, error):
+        # The user may have closed (and destroyed) the dialog before the
+        # response arrived; in that case the result is silently discarded.
+        try:
+            if getattr(dlg, "cancelled", True):
+                return
+        except RuntimeError:
             return
-        announce("Description ready")
-        self._show_description_dialog(description)
-
-    def _show_description_dialog(self, description):
-        from .theme import apply_theme
-
-        parent = self._msg_frame if self._msg_frame.IsShown() else self
-        dlg = wx.Dialog(
-            parent,
-            title="Media Description",
-            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
-        )
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(
-            wx.StaticText(dlg, label="Gemini's description:"),
-            flag=wx.LEFT | wx.TOP | wx.RIGHT,
-            border=10,
-        )
-        text_ctrl = wx.TextCtrl(
-            dlg,
-            value=description,
-            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_BESTWRAP,
-        )
-        text_ctrl.SetName("Media description")
-        sizer.Add(text_ctrl, 1, wx.EXPAND | wx.ALL, 10)
-
-        btn_row = wx.BoxSizer(wx.HORIZONTAL)
-        copy_btn = wx.Button(dlg, label="&Copy")
-        copy_btn.SetName("Copy description")
-        copy_btn.SetToolTip("Copy the description to the clipboard")
-        btn_row.Add(copy_btn, 0, wx.RIGHT, 5)
-        close_btn = wx.Button(dlg, wx.ID_CANCEL, label="C&lose")
-        close_btn.SetName("Close")
-        btn_row.Add(close_btn, 0)
-        sizer.Add(btn_row, 0, wx.ALIGN_RIGHT | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
-
-        dlg.SetSizerAndFit(sizer)
-        dlg.SetMinSize((460, 320))
-        dlg.CenterOnParent()
-        text_ctrl.SetFocus()
-        text_ctrl.SetInsertionPoint(0)
-
-        def _on_copy(event):
-            if wx.TheClipboard.Open():
-                wx.TheClipboard.SetData(wx.TextDataObject(description))
-                wx.TheClipboard.Close()
-                self.SetStatusText("Description copied")
-                announce("Description copied")
-
-        copy_btn.Bind(wx.EVT_BUTTON, _on_copy)
-        apply_theme(dlg)
-        dlg.ShowModal()
-        dlg.Destroy()
+        try:
+            if error:
+                dlg.set_error(error)
+                announce("Description failed")
+            else:
+                dlg.set_result(description)
+                announce("Description ready")
+        except RuntimeError:
+            return
 
     # --------------------------------------------------- Real-time events
 
@@ -2378,6 +2765,10 @@ class MainFrame(wx.Frame):
         self.SetStatusText(msg)
         self._msg_frame.SetStatusText(msg)
         announce(msg, interrupt=True)
+        # The hang-up button in the destroyed dialog may have held focus;
+        # park focus back on the chat surface so screen readers don't end
+        # up reporting a phantom destroyed window.
+        self._restore_focus_after_call()
 
     def _on_hangup(self, event):
         if self.calls.in_call:
@@ -2484,6 +2875,45 @@ class MainFrame(wx.Frame):
         )
         self._in_call_dlg.Show()
 
+    def _restore_focus_after_call(self):
+        """Send focus back to a real control after the in-call dialog is
+        destroyed remotely (call ended, failed, etc.). Without this, the
+        focused hang-up button vanishes from under the screen reader."""
+        try:
+            if self._msg_frame and self._msg_frame.IsShown():
+                self._msg_frame.Raise()
+                if self._current_entity:
+                    self.message_panel.messages_list.SetFocus()
+                else:
+                    self.chat_list.list_ctrl.SetFocus()
+            else:
+                self.Raise()
+                self.chat_list.list_ctrl.SetFocus()
+        except Exception:
+            pass
+
+    def _restore_message_action_focus(self):
+        """Return focus to a real control after a message-action dialog
+        closes. A message-action button (e.g. Save, Describe) is hidden by
+        show_*_button(False) when the selection has no matching media, so
+        returning from its wx.MessageBox would otherwise strand the screen
+        reader on the vanished button.
+
+        The SetFocus is deferred with wx.CallAfter so it runs after wx's own
+        post-modal focus restoration (which would otherwise land focus back
+        on the now-hidden button and win the race)."""
+        def _do_restore():
+            try:
+                if self._msg_frame and self._msg_frame.IsShown():
+                    self._msg_frame.Raise()
+                    self.message_panel.messages_list.SetFocus()
+                else:
+                    self.chat_list.list_ctrl.SetFocus()
+            except Exception:
+                pass
+
+        wx.CallAfter(_do_restore)
+
     def _hang_up(self):
         self.SetStatusText("Hanging up...")
         self._msg_frame.SetStatusText("Hanging up...")
@@ -2538,6 +2968,10 @@ class MainFrame(wx.Frame):
                 except Exception:
                     pass
                 self._in_call_dlg = None
+                # Focus was on the destroyed dialog's hang-up button;
+                # move it back to the chat surface so a screen reader
+                # always lands on a real, focusable control.
+                self._restore_focus_after_call()
 
     # ---------------------------------------------------------- Settings
 
@@ -2559,7 +2993,24 @@ class MainFrame(wx.Frame):
                 self.config["message_template"] = dlg.GetMessageTemplate()
                 self.config.set_gemini_api_key(dlg.GetGeminiApiKey())
                 self.config["gemini_model"] = dlg.GetGeminiModel()
+                new_force_dark = dlg.GetForceDarkTheme()
+                theme_changed = False
+                if new_force_dark is not None:
+                    old_force_dark = bool(
+                        self.config.get("force_dark_theme", False)
+                    )
+                    if bool(new_force_dark) != old_force_dark:
+                        self.config["force_dark_theme"] = bool(new_force_dark)
+                        theme_changed = True
                 self.config.save()
+                if theme_changed:
+                    wx.MessageBox(
+                        "The dark theme setting will take effect the next "
+                        "time Teepee is started.",
+                        "Restart Required",
+                        wx.OK | wx.ICON_INFORMATION,
+                        self._msg_frame if self._msg_frame.IsShown() else self,
+                    )
                 self.sound.set_output_device(dlg.GetOutputDeviceIndex())
                 set_announcements_enabled(
                     self.config.get("announcements_enabled", False)
@@ -2817,7 +3268,8 @@ class MainFrame(wx.Frame):
                 self.tg.submit_wait(
                     self.tg.upload_profile_photo(
                         changes["photo_to_upload"]
-                    )
+                    ),
+                    timeout=None,
                 )
             if changes.get("delete_current_photo"):
                 photos = original.get("photos", [])
@@ -3214,8 +3666,12 @@ class MainFrame(wx.Frame):
         return isinstance(entity, (Channel, Chat))
 
     def _load_files_if_group(self, entity):
+        # Files tab is available for every chat type (user, group, and
+        # channel); telethon's InputMessagesFilterDocument works against
+        # any entity. The name is kept for backward compatibility with the
+        # two existing callers.
         files_panel = self._msg_frame.files_panel
-        if self._is_entity_group_or_channel(entity):
+        if entity is not None:
             files_panel.set_entity(entity)
             files_panel.load_files(entity)
         else:
@@ -3678,6 +4134,8 @@ class MainFrame(wx.Frame):
             ).start()
 
         def _on_role(event):
+            from telethon.tl.types import Channel
+
             member, display = _selected_member()
             if not member:
                 return
@@ -3691,27 +4149,42 @@ class MainFrame(wx.Frame):
                 )
                 return
 
-            choices = ["Member", "Admin"]
-            role_dlg = wx.SingleChoiceDialog(
-                dlg,
-                f"Set role for {display}:",
-                "Member Role",
-                choices,
+            # The anonymous flag lives on ChatAdminRights, which only
+            # exists on Channel entities (both broadcast channels and
+            # supergroups). Basic groups (Chat) have no per-admin rights.
+            anonymous_available = (
+                self._is_entity_group_or_channel(entity)
+                and isinstance(entity, Channel)
             )
-            apply_theme(role_dlg)
-            role_dlg.SetSelection(1 if role_kind == "admin" else 0)
-            if role_dlg.ShowModal() != wx.ID_OK:
-                role_dlg.Destroy()
-                return
-            selected = role_dlg.GetStringSelection()
-            role_dlg.Destroy()
+            existing_rights = self._member_admin_rights(member)
+            current_anonymous = bool(
+                getattr(existing_rights, "anonymous", False)
+            )
 
-            make_admin = selected == "Admin"
+            with MemberRoleDialog(
+                dlg,
+                display,
+                current_role=role_kind,
+                current_anonymous=current_anonymous,
+                anonymous_available=anonymous_available,
+            ) as role_dlg:
+                if role_dlg.ShowModal() != wx.ID_OK:
+                    return
+                make_admin = role_dlg.GetMakeAdmin()
+                anonymous = role_dlg.GetAnonymous()
+
             action_text = "Promoting" if make_admin else "Removing admin role from"
             self.SetStatusText(f"{action_text} {display}...")
             threading.Thread(
                 target=self._set_member_role_thread,
-                args=(entity, member, display, make_admin),
+                args=(
+                    entity,
+                    member,
+                    display,
+                    make_admin,
+                    anonymous,
+                    existing_rights,
+                ),
                 daemon=True,
             ).start()
 
@@ -3890,7 +4363,15 @@ class MainFrame(wx.Frame):
                 "Permissions",
             )
 
-    def _set_member_role_thread(self, entity, user, display_name, make_admin):
+    def _set_member_role_thread(
+        self,
+        entity,
+        user,
+        display_name,
+        make_admin,
+        anonymous=False,
+        existing_rights=None,
+    ):
         try:
             self.tg.submit_wait(
                 self.tg.set_member_admin_role(
@@ -3898,14 +4379,24 @@ class MainFrame(wx.Frame):
                     user,
                     make_admin=make_admin,
                     rank="Admin" if make_admin else "",
+                    anonymous=bool(anonymous),
+                    existing_rights=existing_rights,
                 )
             )
 
-            def _on_role_updated(name=display_name, is_admin=make_admin):
+            def _on_role_updated(
+                name=display_name,
+                is_admin=make_admin,
+                is_anon=bool(anonymous),
+            ):
                 if is_admin:
-                    self.SetStatusText(f"Promoted {name} to admin")
-                    self._msg_frame.SetStatusText(f"Promoted {name} to admin")
-                    announce(f"Promoted {name} to admin")
+                    if is_anon:
+                        msg = f"Promoted {name} to anonymous admin"
+                    else:
+                        msg = f"Promoted {name} to admin"
+                    self.SetStatusText(msg)
+                    self._msg_frame.SetStatusText(msg)
+                    announce(msg)
                 else:
                     self.SetStatusText(f"Removed admin role from {name}")
                     self._msg_frame.SetStatusText(f"Removed admin role from {name}")
@@ -3919,6 +4410,19 @@ class MainFrame(wx.Frame):
                 f"Failed to update member role:\n{e}",
                 "Member Role",
             )
+
+    @staticmethod
+    def _member_admin_rights(member):
+        """Return the ``ChatAdminRights`` currently granted to a member.
+
+        Both ``ChannelParticipantAdmin`` and ``ChannelParticipantCreator``
+        carry an ``admin_rights`` attribute. Anyone else returns ``None``
+        so callers know to fall back to the default promotion template.
+        """
+        participant = getattr(member, "participant", None)
+        if participant is None:
+            return None
+        return getattr(participant, "admin_rights", None)
 
     def _on_edit_title(self, event):
         from .theme import apply_theme
@@ -4103,8 +4607,9 @@ class MainFrame(wx.Frame):
             "  Press the Open Link button on a message with a URL to open it\n"
             "  Press the Describe button to get an AI description of media\n"
             "  Press the Sticker button to search and send stickers by emoji\n\n"
-            "Files (Groups and Channels):\n"
-            "  The Files tab shows all documents shared in a group or channel\n"
+            "Files:\n"
+            "  The Files tab shows all documents shared in the selected chat,\n"
+            "  including one-on-one user chats as well as groups and channels\n"
             "  Type in the search box to search by file name\n"
             "  Enter or double-click to download, or use the Download button\n"
             "  Press Load More to fetch older files\n\n"

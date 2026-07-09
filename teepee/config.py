@@ -23,6 +23,7 @@ DEFAULT_CONFIG = {
     "time_format": "24h",
     "message_template": DEFAULT_MESSAGE_TEMPLATE,
     "gemini_model": DEFAULT_GEMINI_MODEL,
+    "force_dark_theme": False,
 }
 
 

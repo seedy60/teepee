@@ -144,6 +144,7 @@ class LinksPanel(wx.Panel):
         self._loading = True
         self._sync_controls()
         self._set_status("Loading more links...")
+        announce("Loading more links")
         threading.Thread(
             target=self._load_thread,
             args=(self._entity, True),

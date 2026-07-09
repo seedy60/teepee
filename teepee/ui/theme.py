@@ -11,6 +11,30 @@ _DARK_BORDER = wx.Colour(60, 60, 60)
 
 _dark_mode = None
 _high_contrast = None
+_theme_override = None  # None = auto-detect, True/False = forced
+
+
+def is_legacy_windows():
+    """True on Windows 8.1 and earlier, where there's no system dark-mode
+    setting for ``wx.SystemSettings.GetAppearance()`` to report on."""
+    if sys.platform != "win32":
+        return False
+    try:
+        return sys.getwindowsversion().major < 10
+    except Exception:
+        return False
+
+
+def set_theme_override(force_dark):
+    """Manually force dark mode on (``True``) or off (``False``).
+
+    Pass ``None`` to clear the override and fall back to auto-detection.
+    Used on legacy Windows where there's no system-level dark setting to
+    follow, so the user opts in or out via Teepee's settings instead.
+    """
+    global _theme_override, _dark_mode
+    _theme_override = None if force_dark is None else bool(force_dark)
+    _dark_mode = None  # invalidate cache so the new value takes effect
 
 
 def is_high_contrast():
@@ -40,6 +64,8 @@ def is_high_contrast():
 
 def is_dark_mode():
     global _dark_mode
+    if _theme_override is not None:
+        return _theme_override
     if _dark_mode is not None:
         return _dark_mode
     try:

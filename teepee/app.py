@@ -12,7 +12,7 @@ from .config import Config
 from .sound_manager import SoundManager
 from .telegram_manager import TelegramManager
 from .ui.main_frame import MainFrame
-from .ui.theme import apply_theme
+from .ui.theme import apply_theme, is_legacy_windows, set_theme_override
 from .updater import cleanup_old_files
 from .voice_manager import VoiceManager
 
@@ -65,6 +65,10 @@ class TeepeeApp(wx.App):
         cleanup_old_files()
 
         self.config = Config()
+        # On Windows 8.1 and earlier there's no system dark-mode setting to
+        # follow, so honour the user's manual choice from settings.
+        if is_legacy_windows():
+            set_theme_override(self.config.get("force_dark_theme", False))
         self.telegram_manager = TelegramManager(self.config)
         self.sound_manager = SoundManager(self.config)
         self.voice_manager = VoiceManager(self.config, self.sound_manager)
@@ -95,21 +99,14 @@ class TeepeeApp(wx.App):
 def main():
     setup_logging()
     logging.info("Starting Teepee...")
-    if sys.platform == "win32":
-        import ctypes
+    # Normally run.py performs the single-instance check before importing this
+    # module (so a second launch exits fast). This is a safety net for any
+    # entry point that reaches main() directly; it is idempotent, so when
+    # run.py already acquired the mutex it simply returns True here.
+    from .single_instance import acquire_or_signal
 
-        # Single-instance check using a named mutex
-        _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "TeepeeAppMutex")
-        if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            # Signal existing instance to restore from tray
-            if os.name == "nt":
-                base = Path(os.environ.get("APPDATA", str(Path.home())))
-            else:
-                base = Path.home() / ".config"
-            data_dir = base / "Teepee"
-            data_dir.mkdir(parents=True, exist_ok=True)
-            (data_dir / ".restore").touch()
-            sys.exit(0)
+    if not acquire_or_signal():
+        sys.exit(0)
 
     app = TeepeeApp(redirect=False)
     app.MainLoop()

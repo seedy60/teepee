@@ -238,7 +238,7 @@ class FilesPanel(wx.Panel):
     def _download_thread(self, msg, save_path):
         try:
             result = self.frame.tg.submit_wait(
-                self.frame.tg.download_media(msg, save_path)
+                self.frame.tg.download_media(msg, save_path), timeout=None
             )
             if result:
                 name = os.path.basename(save_path)

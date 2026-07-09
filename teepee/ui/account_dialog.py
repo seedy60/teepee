@@ -1055,6 +1055,17 @@ class AccountDialog(wx.Dialog):
             self._set_tfa_buttons_enabled(True)
             announce(msg)
             wx.MessageBox(msg, "Two-factor Authentication", wx.OK | wx.ICON_INFORMATION, self)
+            # The button the user just clicked may have been hidden by
+            # _update_tfa_buttons; park focus on whichever TFA button is now
+            # visible so screen reader users land somewhere meaningful.
+            for btn in (
+                self._setup_2fa_btn,
+                self._change_2fa_btn,
+                self._disable_2fa_btn,
+            ):
+                if btn.IsShown():
+                    btn.SetFocus()
+                    break
         else:
             self._tfa_status_ctrl.SetValue(
                 "Enabled" if self._account_data.get("has_2fa") else "Disabled"

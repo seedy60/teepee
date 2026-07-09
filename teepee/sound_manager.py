@@ -35,15 +35,73 @@ class SoundManager:
         except Exception:
             return ["Default"]
 
+    # Cached parallel list mapping UI-list indices to BASS device indices.
+    # Position 0 is the "Default" pseudo-entry (BASS device -1).
+    _input_bass_indices = None
+
     def get_input_devices(self):
+        """Enumerate input devices, filtering out loopback ("listen to your
+        own speakers") entries that BASS_RecordGetDeviceInfo exposes
+        alongside real microphones on Windows. Also populates an internal
+        UI-index -> BASS-device-id map so the saved selection still resolves
+        correctly after filtering."""
         if not HAS_SOUND_LIB:
+            self._input_bass_indices = [-1]
             return ["Default"]
         try:
-            from sound_lib.input import Input
+            import ctypes
+            import platform as _platform
+            from sound_lib.external.pybass import (
+                BASS_DEVICE_ENABLED,
+                BASS_DEVICEINFO,
+                BASS_RecordGetDeviceInfo,
+            )
 
-            return Input.get_device_names()
-        except Exception:
+            # BASS_DEVICE_LOOPBACK is documented as bit 8 but isn't always
+            # re-exported by pybass; use the numeric value directly.
+            LOOPBACK_FLAG = 8
+
+            names = ["Default"]
+            bass_indices = [-1]
+            info = BASS_DEVICEINFO()
+            i = 0
+            while BASS_RecordGetDeviceInfo(i, ctypes.byref(info)):
+                flags = info.flags
+                if (flags & BASS_DEVICE_ENABLED) and not (flags & LOOPBACK_FLAG):
+                    raw = info.name
+                    if _platform.system() == "Windows":
+                        name = raw.decode("mbcs", errors="replace")
+                    elif _platform.system() == "Darwin":
+                        name = raw.decode("utf-8", errors="replace")
+                    else:
+                        name = (
+                            raw.decode("utf-8", errors="replace")
+                            if isinstance(raw, bytes) else raw
+                        )
+                    name = name.replace("(", "").replace(")", "").strip()
+                    names.append(name)
+                    bass_indices.append(i)
+                i += 1
+            self._input_bass_indices = bass_indices
+            return names
+        except Exception as e:
+            log.debug("Failed to enumerate input devices: %s", e)
+            self._input_bass_indices = [-1]
             return ["Default"]
+
+    def get_input_bass_device(self, list_index):
+        """Translate a UI-list index (as stored in config) to the underlying
+        BASS device id, accounting for any loopback entries that were
+        filtered out of ``get_input_devices``."""
+        if self._input_bass_indices is None:
+            # Build the map lazily.
+            self.get_input_devices()
+        indices = self._input_bass_indices or [-1]
+        if list_index is None or list_index < 0:
+            return -1
+        if 0 <= list_index < len(indices):
+            return indices[list_index]
+        return -1
 
     @staticmethod
     def get_video_devices():
@@ -139,6 +197,46 @@ class SoundManager:
     def play_channel_received(self):
         self.play_notification("channel_received")
 
+    def play_voice_start(self):
+        """Play the start-of-recording cue and return its duration in
+        seconds, so the caller can defer the actual microphone start until
+        the cue has finished. Returns 0 if no cue plays."""
+        return self._play_cue_with_duration("voice_start")
+
+    def play_voice_stop(self):
+        """Play the end-of-recording cue. Safe to fire right after stopping
+        the microphone since the recording is already closed."""
+        self._play_cue_with_duration("voice_stop")
+
+    def _play_cue_with_duration(self, base_name):
+        if not self.config.get("sounds_enabled", True):
+            return 0.0
+        sounds_dir = self.config.sounds_dir
+        for ext in (".wav", ".mp3", ".ogg"):
+            path = sounds_dir / f"{base_name}{ext}"
+            if path.exists():
+                duration = self._media_duration(path)
+                self.play_file(path)
+                return duration
+        log.debug("Sound file not found: %s", base_name)
+        return 0.0
+
+    @staticmethod
+    def _media_duration(path):
+        """Return the duration of a WAV file in seconds, or 0.0 if it can't
+        be determined (e.g. for MP3 / OGG without ffprobe)."""
+        try:
+            if str(path).lower().endswith(".wav"):
+                import wave
+                with wave.open(str(path), "rb") as wf:
+                    frames = wf.getnframes()
+                    rate = wf.getframerate()
+                    if rate:
+                        return frames / float(rate)
+        except Exception:
+            pass
+        return 0.0
+
     def play_call_in(self):
         sounds_dir = self.config.sounds_dir
         for ext in (".wav", ".mp3", ".ogg"):
@@ -161,7 +259,7 @@ class SoundManager:
         return self.play_notification("ringing")
 
     def stop_stream(self, stream):
-        if stream:
+        if stream is not None:
             try:
                 stream.looping = False
                 stream.stop()
@@ -218,7 +316,7 @@ class SoundManager:
             from sound_lib.recording import WaveRecording
 
             list_index = self.config.get("input_device_index", -1)
-            bass_device = list_index - 1 if list_index > 0 else -1
+            bass_device = self.get_input_bass_device(list_index)
             try:
                 self._test_input = Input(device=bass_device)
             except Exception:

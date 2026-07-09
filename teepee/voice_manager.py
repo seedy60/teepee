@@ -34,7 +34,7 @@ class VoiceManager:
         if not HAS_RECORDING:
             return
         list_index = self.config.get("input_device_index", -1)
-        bass_device = list_index - 1 if list_index > 0 else -1
+        bass_device = self.sound_manager.get_input_bass_device(list_index)
         try:
             from sound_lib.input import Input
 
@@ -61,7 +61,15 @@ class VoiceManager:
             return None
 
     def stop_recording(self):
-        if not self._recording:
+        """Stop the active recording and return the raw WAV path, or None if
+        nothing was recorded. The caller is then responsible for either
+        previewing it, converting it for sending (``convert_for_send``), or
+        discarding it (``discard_recording``)."""
+        # Use an identity check rather than truthiness: ``bool(WaveRecording)``
+        # routes through ``Channel.__bool__`` which calls BASS_ChannelGetLength,
+        # and BASS raises ``BASS_ERROR_NOTAVAIL`` if you ask the length of a
+        # recording channel that hasn't had time to produce data yet.
+        if self._recording is None:
             return None
         try:
             self._recording.stop()
@@ -74,9 +82,28 @@ class VoiceManager:
 
         if not wav_path or not os.path.exists(wav_path):
             return None
+        return wav_path
 
+    def convert_for_send(self, wav_path):
+        """Convert a recorded WAV to OGG/Opus for sending as a Telegram voice
+        message. Returns the OGG path, or the original WAV path if pydub /
+        ffmpeg are unavailable."""
+        if not wav_path or not os.path.exists(wav_path):
+            return None
         ogg_path = self._convert_to_ogg(wav_path)
         return ogg_path if ogg_path else wav_path
+
+    def discard_recording(self, wav_path):
+        """Delete a recorded WAV (and its OGG sibling, if any) without
+        sending."""
+        if not wav_path:
+            return
+        for candidate in (wav_path, wav_path.replace(".wav", ".ogg")):
+            try:
+                if os.path.exists(candidate):
+                    os.remove(candidate)
+            except OSError:
+                pass
 
     def _convert_to_ogg(self, wav_path):
         if not HAS_PYDUB:
@@ -121,7 +148,7 @@ class VoiceManager:
             return file_path
 
     def stop_playback(self):
-        if self._playback_stream:
+        if self._playback_stream is not None:
             try:
                 self._playback_stream.stop()
             except Exception:

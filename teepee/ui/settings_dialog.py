@@ -4,7 +4,7 @@ import wx
 from ..config import DEFAULT_GEMINI_MODEL, DEFAULT_MESSAGE_TEMPLATE
 from .. import gemini
 from .announce import list_announcement_backends, list_announcement_voices
-from .theme import apply_theme
+from .theme import apply_theme, is_legacy_windows
 
 
 class SettingsDialog(wx.Dialog):
@@ -211,6 +211,26 @@ class SettingsDialog(wx.Dialog):
         # --- Display ---
         display_box = wx.StaticBoxSizer(wx.VERTICAL, self, "Display")
 
+        # On Windows 10+ Teepee follows the system dark-mode setting
+        # automatically, so this manual toggle is only useful on older
+        # Windows where no such system setting exists.
+        self.force_dark_theme = None
+        if is_legacy_windows():
+            self.force_dark_theme = wx.CheckBox(
+                self, label="Use Teepee's dark theme"
+            )
+            self.force_dark_theme.SetName("Use Teepee's dark theme")
+            self.force_dark_theme.SetToolTip(
+                "Apply Teepee's built-in dark color scheme. Takes effect "
+                "the next time Teepee is restarted."
+            )
+            self.force_dark_theme.SetValue(
+                bool(config.get("force_dark_theme", False))
+            )
+            display_box.Add(
+                self.force_dark_theme, flag=wx.ALL, border=5
+            )
+
         display_box.Add(
             wx.StaticText(self, label="Time Format:"),
             flag=wx.LEFT | wx.TOP,
@@ -386,6 +406,14 @@ class SettingsDialog(wx.Dialog):
     def GetGeminiApiKey(self):
         return self.gemini_key_ctrl.GetValue().strip()
 
+    def GetForceDarkTheme(self):
+        """Return the dark-theme checkbox state, or ``None`` if the option
+        isn't shown on this platform (so the saved value should be left
+        untouched)."""
+        if self.force_dark_theme is None:
+            return None
+        return self.force_dark_theme.GetValue()
+
     def GetGeminiModel(self):
         value = self.gemini_model_combo.GetValue().strip()
         return value or DEFAULT_GEMINI_MODEL
@@ -409,6 +437,9 @@ class SettingsDialog(wx.Dialog):
         self._models_loading = True
         self.refresh_models_btn.Enable(False)
         self.refresh_models_btn.SetLabel("Refreshing...")
+        if manual:
+            from .announce import announce
+            announce("Refreshing models")
         threading.Thread(
             target=self._refresh_models_thread,
             args=(api_key, manual),

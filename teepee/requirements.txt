@@ -1,0 +1,7 @@
+telethon>=1.36.0
+wxPython>=4.2.0
+sound_lib @ git+https://github.com/accessibleapps/sound_lib.git
+prismatoid>=0.1.0
+pydub>=0.25.1
+cryptg>=0.4
+ntgcalls>=2.1.0\nopencv-python>=4.8.0

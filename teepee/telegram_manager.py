@@ -193,6 +193,24 @@ class TelegramManager:
         return 0
 
     async def download_media(self, message, path):
+        # Use parallel MTProto senders for higher throughput when the target
+        # is a concrete file path of meaningful size; fall back to telethon's
+        # built-in download for tiny files, directory targets, and CDN files.
+        from . import fast_download
+
+        if fast_download.is_parallel_worthwhile(message, path):
+            try:
+                return await fast_download.parallel_download(
+                    self.client, message, str(path)
+                )
+            except fast_download._CdnRedirect:
+                log.info("CDN-hosted media; using single-stream fallback")
+            except Exception as e:
+                log.warning(
+                    "Parallel download failed (%s); falling back to single stream",
+                    e,
+                    exc_info=True,
+                )
         return await self.client.download_media(message, file=str(path))
 
     async def edit_message(self, entity, message_id, new_text):
@@ -441,7 +459,15 @@ class TelegramManager:
         )
         return await self.client(EditBannedRequest(peer, user, rights))
 
-    async def set_member_admin_role(self, entity, user, make_admin, rank="Admin"):
+    async def set_member_admin_role(
+        self,
+        entity,
+        user,
+        make_admin,
+        rank="Admin",
+        anonymous=False,
+        existing_rights=None,
+    ):
         from telethon.tl.functions.channels import EditAdminRequest
         from telethon.tl.functions.messages import EditChatAdminRequest
         from telethon.tl.types import Chat
@@ -449,7 +475,8 @@ class TelegramManager:
 
         peer = await self.client.get_entity(entity)
 
-        # Basic groups (Chat) use EditChatAdminRequest.
+        # Basic groups (Chat) use EditChatAdminRequest. They have no
+        # per-admin rights, so the anonymous flag is silently ignored.
         if isinstance(peer, Chat):
             return await self.client(
                 EditChatAdminRequest(
@@ -461,23 +488,47 @@ class TelegramManager:
 
         # Channels/supergroups use EditAdminRequest and ChatAdminRights.
         if make_admin:
-            rights = ChatAdminRights(
-                change_info=True,
-                post_messages=True,
-                edit_messages=True,
-                delete_messages=True,
-                ban_users=True,
-                invite_users=True,
-                pin_messages=True,
-                add_admins=False,
-                anonymous=False,
-                manage_call=True,
-                other=True,
-                manage_topics=True,
-                post_stories=True,
-                edit_stories=True,
-                delete_stories=True,
-            )
+            if existing_rights is not None:
+                # Preserve every currently-granted right and only override
+                # the anonymous flag. This keeps custom permission sets
+                # (for example, "post messages" without "delete messages")
+                # intact when the caller just wants to flip the anonymous
+                # toggle from the UI.
+                rights = ChatAdminRights(
+                    change_info=bool(getattr(existing_rights, "change_info", False)),
+                    post_messages=bool(getattr(existing_rights, "post_messages", False)),
+                    edit_messages=bool(getattr(existing_rights, "edit_messages", False)),
+                    delete_messages=bool(getattr(existing_rights, "delete_messages", False)),
+                    ban_users=bool(getattr(existing_rights, "ban_users", False)),
+                    invite_users=bool(getattr(existing_rights, "invite_users", False)),
+                    pin_messages=bool(getattr(existing_rights, "pin_messages", False)),
+                    add_admins=bool(getattr(existing_rights, "add_admins", False)),
+                    anonymous=bool(anonymous),
+                    manage_call=bool(getattr(existing_rights, "manage_call", False)),
+                    other=bool(getattr(existing_rights, "other", False)),
+                    manage_topics=bool(getattr(existing_rights, "manage_topics", False)),
+                    post_stories=bool(getattr(existing_rights, "post_stories", False)),
+                    edit_stories=bool(getattr(existing_rights, "edit_stories", False)),
+                    delete_stories=bool(getattr(existing_rights, "delete_stories", False)),
+                )
+            else:
+                rights = ChatAdminRights(
+                    change_info=True,
+                    post_messages=True,
+                    edit_messages=True,
+                    delete_messages=True,
+                    ban_users=True,
+                    invite_users=True,
+                    pin_messages=True,
+                    add_admins=False,
+                    anonymous=bool(anonymous),
+                    manage_call=True,
+                    other=True,
+                    manage_topics=True,
+                    post_stories=True,
+                    edit_stories=True,
+                    delete_stories=True,
+                )
             role_rank = rank or "Admin"
         else:
             rights = ChatAdminRights(

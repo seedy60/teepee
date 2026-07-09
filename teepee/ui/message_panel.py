@@ -549,7 +549,7 @@ class MessagePanel(wx.Panel):
             self.voice_btn.SetLabel("S&top")
             self.voice_btn.SetName("Stop recording")
             self.voice_btn.SetToolTip(
-                "Stop recording and send the voice message"
+                "Stop recording and preview the voice message before sending"
             )
             self.frame.SetStatusText("Recording...")
             self.frame._msg_frame.SetStatusText("Recording...")
@@ -560,9 +560,9 @@ class MessagePanel(wx.Panel):
             self.voice_btn.SetLabel("V&oice")
             self.voice_btn.SetName("Voice")
             self.voice_btn.SetToolTip("Record a voice message")
-            self.frame.SetStatusText("Recording stopped, sending...")
-            self.frame._msg_frame.SetStatusText("Recording stopped, sending...")
-            announce("Recording stopped, sending")
+            self.frame.SetStatusText("Recording stopped")
+            self.frame._msg_frame.SetStatusText("Recording stopped")
+            announce("Recording stopped")
             self.frame.stop_voice_recording()
 
     def _on_play(self, event):
